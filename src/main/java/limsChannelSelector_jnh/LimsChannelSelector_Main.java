@@ -26,6 +26,9 @@ import java.io.File;
 import java.text.DecimalFormat;
 import java.text.DecimalFormatSymbols;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.Date;
 import java.util.LinkedList;
 import java.util.Locale;
@@ -36,6 +39,8 @@ import javax.xml.xpath.XPath;
 import org.w3c.dom.Document;
 import org.w3c.dom.Node;
 import ij.IJ;
+import ij.ImagePlus;
+import ij.ImageStack;
 import ij.gui.GenericDialog;
 import ij.gui.WaitForUserDialog;
 import ij.plugin.PlugIn;
@@ -264,7 +269,7 @@ public class LimsChannelSelector_Main implements PlugIn {
 						if (fileList[f].contains("_Z")) {
 							omeTifFilesPresent = true;
 						}else {
-							if(logWholeOMEXMLComments || logInitialFileScreening || logWholeOMEXMLComments) {
+							if(extendedLogging || logInitialFileScreening || logWholeOMEXMLComments) {
 								IJ.log("" 
 										+ fileList[f]
 										+ " did not contain _Z and thus it will be skipped!");
@@ -273,7 +278,7 @@ public class LimsChannelSelector_Main implements PlugIn {
 							continue;
 						}
 					}else {
-						if(logWholeOMEXMLComments || logInitialFileScreening || logWholeOMEXMLComments) {
+						if(extendedLogging || logInitialFileScreening || logWholeOMEXMLComments) {
 							IJ.log("" 
 									+ fileList[f]
 									+ " is neither a metadata folder nor an .ome.tif file and thus it will be skipped!");
@@ -284,13 +289,13 @@ public class LimsChannelSelector_Main implements PlugIn {
 					
 				}
 				if (withMetaData == false) {
-					if(logWholeOMEXMLComments || logInitialFileScreening || logWholeOMEXMLComments) {
+					if(extendedLogging || logInitialFileScreening || logWholeOMEXMLComments) {
 						IJ.log(od.filesToOpen.get(task).getName() + " was skipped since missing MetaData folder");
 						continue scanning;
 					}
 				}
 				if (omeTifFilesPresent == false) {
-					if(logWholeOMEXMLComments || logInitialFileScreening || logWholeOMEXMLComments) {
+					if(extendedLogging || logInitialFileScreening || logWholeOMEXMLComments) {
 						IJ.log(od.filesToOpen.get(task).getName() + " was skipped since no tif files present");
 						continue scanning;
 					}
@@ -317,7 +322,7 @@ public class LimsChannelSelector_Main implements PlugIn {
 				// Copy new files to all files list
 				allFiles.add(tempFile);
 
-				if(logWholeOMEXMLComments || logInitialFileScreening || logWholeOMEXMLComments) {
+				if(extendedLogging || logInitialFileScreening || logWholeOMEXMLComments) {
 					IJ.log("ACCEPTED: " + tempFile);
 				}
 			}
@@ -333,7 +338,7 @@ public class LimsChannelSelector_Main implements PlugIn {
 				name[task] = tempFile.substring(tempFile.lastIndexOf(System.getProperty("file.separator")) + 1);
 				dir[task] = tempFile;
 
-				if(logWholeOMEXMLComments || logInitialFileScreening || logWholeOMEXMLComments) {
+				if(extendedLogging || logInitialFileScreening || logWholeOMEXMLComments) {
 					IJ.log("FULL PATH: " + fullPath[task]);
 					IJ.log("name:" + name[task]);
 					IJ.log("dir:" + dir[task]);	
@@ -370,8 +375,43 @@ public class LimsChannelSelector_Main implements PlugIn {
 		// -----------------------------PROCESS TASKS----------------------------------
 		// &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
 				
+		String tmpMsg = "";
 		for (int task = 0; task < tasks; task++) {
 			running: while (continueProcessing) {
+				// Check how many planes there are by checking how many folders with the name are in the folder
+				int nrOfPlanes = 0;
+				{
+					String[] fileList = new File(fullPath[task].substring(0, fullPath[task].lastIndexOf(name[task])-1)).list();
+
+					
+					for (int f = 0; f < fileList.length; f++) {
+						if (fileList[f].endsWith(name[task])) {
+							nrOfPlanes = 1;
+							break;
+						}else if (fileList[f].contains(name[task] + "_Z")){
+							nrOfPlanes ++;
+						}
+					}
+
+					tmpMsg = "Found " + nrOfPlanes + " planes for file " + name[task] + "!";
+					progress.updateBarText(tmpMsg);
+					if(extendedLogging)	progress.notifyMessage("Task " + (task+1) + ": " + tmpMsg, ProgressDialog.LOG);
+				}
+								
+				// Open the channels to be analyzed
+				ImagePlus impChannelA = openChannel(fullPath [task], name[task], nrOfPlanes, (channelA-1), task);
+				ImagePlus impChannelB = openChannel(fullPath [task], name[task], nrOfPlanes, (channelB-1), task);
+				
+				impChannelA.show();
+				new WaitForUserDialog("Check A").show();
+				impChannelA.hide();
+				impChannelB.show();
+				new WaitForUserDialog("Check B").show();
+				impChannelB.hide();
+				
+				double [] valuesA = getPercentileValuesBySections (impChannelA, 5, 99.995);
+				double [] valuesB = getPercentileValuesBySections (impChannelB, 5, 99.995);
+				
 				// TODO Develop processing of files
 				
 				/**
@@ -385,5 +425,123 @@ public class LimsChannelSelector_Main implements PlugIn {
 			progress.moveTask(task);
 			System.gc();	
 		}
-	}	
+	}
+
+	/**
+	 * @param filePathPrefix
+	 * @param name
+	 * @param nrOfPlanes
+	 * @param channel: 0 <= channel < nrOfChannels
+	 * @param task
+	 */	
+	private ImagePlus openChannel(String filePathPrefix, String name, int nrOfPlanes, int channel, int task) {
+		ImagePlus imp = null;
+		String channelString = "0", planeString = "0", tempString = "";
+		if(channel > 9) {
+			channelString = channel + "";
+		}else {
+			channelString += channel + "";
+		}
+		
+		if(nrOfPlanes == 1) {
+			tempString = filePathPrefix + "" + System.getProperty("file.separator") + name + "_Z00_C" + channelString + ".ome.tif";
+			
+			String tmpMsg = "Opening " + name + " (" +  tempString + ")...";
+			progress.updateBarText(tmpMsg);
+			if(extendedLogging)	progress.notifyMessage("Task " + (task+1) + ": " + tmpMsg, ProgressDialog.LOG);
+			
+			imp = IJ.openImage(tempString);
+		}else {
+			ImageStack stackOut = new ImageStack(10,10);	//Random values for initialization because intialized later	
+			int width = 10, height = 10;
+			int bits = 8;
+			
+			for(int z = 0; z < nrOfPlanes; z++) {
+				planeString = "0";
+				if(z > 9) {
+					planeString = "" + z;
+				}else {
+					planeString += "" + z;
+				}
+
+				tempString = filePathPrefix + "_Z" + planeString + "" + System.getProperty("file.separator") + name + "_Z" + planeString + "_C" + channelString + ".ome.tif";
+				
+				String tmpMsg = "Opening " + name + "_Z" + planeString + "_C" + channelString + ".ome.tif" + " (" +  tempString + ")...";
+				progress.updateBarText(tmpMsg);
+				if(extendedLogging)	progress.notifyMessage("Task " + (task+1) + ": " + tmpMsg, ProgressDialog.LOG);
+				
+				imp = IJ.openImage(tempString);
+				
+				if(z == 0){
+					width = imp.getWidth();
+					height = imp.getHeight();
+					bits = imp.getBitDepth();
+					stackOut = new ImageStack(width,height);
+				}
+				stackOut.addSlice(imp.getProcessor());
+			}
+			
+			imp = IJ.createImage("Channel " + (channel+1), width, height, imp.getNSlices(), bits);
+			imp.setStack(stackOut);
+		}
+		
+		return imp;
+	}
+	
+	private double [] getPercentileValuesBySections (ImagePlus imp, int sectionFactor, double percentile) {
+		int width = imp.getWidth();
+		int height = imp.getHeight();
+		
+		double outValues [] = new double [sectionFactor * sectionFactor];
+		Arrays.fill(outValues, 0.0);
+		
+		ArrayList <ArrayList <Double>> sectionLists = new ArrayList <ArrayList <Double>>(sectionFactor * sectionFactor);
+		for(int i = 0; i < sectionFactor * sectionFactor; i++) {
+			sectionLists.add(new ArrayList <Double> (((int)(width/(double)sectionFactor)+1)*((int)(height/(double)sectionFactor)+1)));
+		}
+		
+		int coord, xCoord, yCoord;
+		
+		for(int z = 0; z < imp.getStackSize(); z++) {
+			for(int x = 0; x < width; x ++) {
+				for(int y = 0; y < height; y ++) {
+					xCoord = (int) ((double) x / (double) width * (double) sectionFactor);
+					yCoord = (int) ((double) y / (double) height * (double) sectionFactor);
+					coord = yCoord * sectionFactor + xCoord;
+					
+					sectionLists.get(coord).add(imp.getStack().getVoxel(x, y, z));
+				}
+			}
+		}
+		
+		int index;
+		for(int i = 0; i < sectionFactor * sectionFactor; i++) {
+			Collections.sort(sectionLists.get(i));
+//			if(extendedLogging) {
+//				IJ.log("Values for section" + (i+1));
+//				for(int j = 0; j < sectionLists.get(i).size(); j++) {
+//					IJ.log("Value " + j + ":	" + sectionLists.get(i).get(j));					
+//				}
+//			}
+			
+			index = (int)Math.round(sectionLists.get(i).size()*(percentile/100.0))-1;
+			outValues [i] = sectionLists.get(i).get(index);
+			if(extendedLogging) progress.notifyMessage("For section " + (i+1) + " the " + percentile + " value was "
+					+ outValues [i]
+					+ ", determined at index " + index + " for a list of size " + sectionLists.get(i).size(),
+					ProgressDialog.LOG);
+			if(extendedLogging) progress.notifyMessage("For section " + (i+1) + " max, min, last, first were " 
+					+ Collections.max(sectionLists.get(i))
+					+ ", "
+					+ Collections.min(sectionLists.get(i))
+					+ ", "
+					+ sectionLists.get(i).get(sectionLists.get(i).size()-1)
+					+ ", "
+					+ sectionLists.get(i).get(0)
+					+".",
+					ProgressDialog.LOG);
+		}
+		
+		return outValues;
+	}
 }// end main class
