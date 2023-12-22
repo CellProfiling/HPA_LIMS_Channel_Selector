@@ -90,6 +90,9 @@ public class LimsChannelSelector_Main implements PlugIn {
 	
 	int channelA = 4, channelB = 5;
 	
+	String decisionType [] = new String [] {"Decide by well","Decide by image"};
+	String selectedDecisionType = decisionType [0];
+	
 	// -----------------define params for Dialog-----------------
 	
 	
@@ -125,7 +128,10 @@ public class LimsChannelSelector_Main implements PlugIn {
 	// Developer variables
 	static final boolean LOGPOSITIONCONVERSIONFORDIAGNOSIS = false;// This fixed variable is just used when working on the code and to retrieve certain log output only
 	static final boolean LOGZDISTFINDING = false;// This fixed variable is just used when working on the code and to retrieve certain log output only
-
+	int factorization = 5;
+	double percentile = 99.995;
+	
+	
 	@Override
 	public void run(String arg) {
 		// &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
@@ -138,7 +144,6 @@ public class LimsChannelSelector_Main implements PlugIn {
 		dformatDialog.setDecimalFormatSymbols(new DecimalFormatSymbols(Locale.US));
 
 		String name[] = { "", "" };
-		String dir[] = { "", "" };
 		String fullPath[] = { "", "" };
 		
 		xPathfactory = XPathFactory.newInstance();
@@ -168,6 +173,9 @@ public class LimsChannelSelector_Main implements PlugIn {
 		gd.setInsets(0, 0, 0);	gd.addNumericField("Channel A",channelA,0);
 		gd.setInsets(0, 0, 0);	gd.addNumericField("Channel A",channelB,0);
 
+		gd.setInsets(10,0,0);	gd.addMessage("Decision Type:", SubHeadingFont);
+		gd.setInsets(0,0,0);		gd.addChoice("Decision style:", decisionType, selectedDecisionType);	
+				
 		gd.setInsets(0,0,0);		gd.addStringField("Filepath to output directory", outPath, 35);
 		gd.setInsets(0,0,0);		gd.addMessage("This path defines where outputfiles will be stored.", InstructionsFont);
 		gd.setInsets(0,0,0);		gd.addMessage("Make sure this path does not contain identically named files - the program may overwrite them.", InstructionsFont);
@@ -186,6 +194,7 @@ public class LimsChannelSelector_Main implements PlugIn {
 		selectedInputType = gd.getNextChoice();
 		channelA = (int) Math.round(gd.getNextNumber());
 		channelB = (int) Math.round(gd.getNextNumber());
+		selectedDecisionType = gd.getNextChoice();
 		outPath = gd.getNextString();
 		extendedLogging = gd.getNextBoolean();
 		logInitialFileScreening = gd.getNextBoolean();
@@ -313,15 +322,30 @@ public class LimsChannelSelector_Main implements PlugIn {
 					tempFile = tempFile.substring(0,tempFile.lastIndexOf("_Z"));
 				}
 				
-				for (int ff = 0; ff < allFiles.size(); ff++) {
-					if (allFiles.get(ff).equals(tempFile)) {
-						continue scanning;
-					}
-				}			
+				if(selectedDecisionType == decisionType[0]) {
+					//Decide by well
+					tempFile = tempFile.substring(0,tempFile.lastIndexOf(System.getProperty("file.separator")));
+					
+					for (int ff = 0; ff < allFiles.size(); ff++) {
+						if (allFiles.get(ff).equals(tempFile)) {
+							continue scanning;
+						}
+					}			
 
-				// Copy new files to all files list
-				allFiles.add(tempFile);
+					// Copy new files to all files list
+					allFiles.add(tempFile);
+				}else if(selectedDecisionType == decisionType[1]) {
+					//Decide by image
+					for (int ff = 0; ff < allFiles.size(); ff++) {
+						if (allFiles.get(ff).equals(tempFile)) {
+							continue scanning;
+						}
+					}			
 
+					// Copy new files to all files list
+					allFiles.add(tempFile);
+				}
+				
 				if(extendedLogging || logInitialFileScreening || logWholeOMEXMLComments) {
 					IJ.log("ACCEPTED: " + tempFile);
 				}
@@ -330,18 +354,14 @@ public class LimsChannelSelector_Main implements PlugIn {
 			// Generate arrays based on unique names
 			tasks = allFiles.size();
 			name = new String[tasks];
-			dir = new String[tasks];
 			fullPath = new String[tasks];
 			for (int task = 0; task < allFiles.size(); task++) {
 				tempFile = allFiles.get(task);
 				fullPath[task] = tempFile;
 				name[task] = tempFile.substring(tempFile.lastIndexOf(System.getProperty("file.separator")) + 1);
-				dir[task] = tempFile;
-
 				if(extendedLogging || logInitialFileScreening || logWholeOMEXMLComments) {
 					IJ.log("FULL PATH: " + fullPath[task]);
-					IJ.log("name:" + name[task]);
-					IJ.log("dir:" + dir[task]);	
+					IJ.log("Name:" + name[task]);
 				}
 			}
 			allFiles.clear();
@@ -376,43 +396,87 @@ public class LimsChannelSelector_Main implements PlugIn {
 		// &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
 				
 		String tmpMsg = "";
+		int subTasks = 1;
+		String subTasksPath [] = new String [0];
+		String subTasksName [] = new String [0];
+//		double allValuesA [][], allValuesB [][];
+		boolean overSat [];
+				
 		for (int task = 0; task < tasks; task++) {
 			running: while (continueProcessing) {
-				// Check how many planes there are by checking how many folders with the name are in the folder
-				int nrOfPlanes = 0;
-				{
-					String[] fileList = new File(fullPath[task].substring(0, fullPath[task].lastIndexOf(name[task])-1)).list();
-
-					
-					for (int f = 0; f < fileList.length; f++) {
-						if (fileList[f].endsWith(name[task])) {
-							nrOfPlanes = 1;
-							break;
-						}else if (fileList[f].contains(name[task] + "_Z")){
-							nrOfPlanes ++;
-						}
+				/**
+				 * Create a list of the tasks ("subTasks") that we need to process and decide on together
+				 */				
+				subTasksPath = new String [0];
+				subTasksName = new String [0];
+				
+				if(selectedDecisionType == decisionType[0]) {
+					//Decide by well
+					subTasksPath = getImageFolderPathsInDirectory(new File(fullPath[task]));
+					subTasksName = new String [subTasksPath.length];
+					for(int p = 0; p < subTasksPath.length; p++) {
+						subTasksName [p] = subTasksPath [p].substring(subTasksPath [p].lastIndexOf(System.getProperty("file.separator")) + 1);
 					}
-
-					tmpMsg = "Found " + nrOfPlanes + " planes for file " + name[task] + "!";
-					progress.updateBarText(tmpMsg);
-					if(extendedLogging)	progress.notifyMessage("Task " + (task+1) + ": " + tmpMsg, ProgressDialog.LOG);
+				}else if(selectedDecisionType == decisionType[1]) {
+					//Decide by image
+					subTasksPath = new String [] {fullPath[task]};
+					subTasksName = new String [] {name[task]};
+					
 				}
-								
-				// Open the channels to be analyzed
-				ImagePlus impChannelA = openChannel(fullPath [task], name[task], nrOfPlanes, (channelA-1), task);
-				ImagePlus impChannelB = openChannel(fullPath [task], name[task], nrOfPlanes, (channelB-1), task);
 				
-				impChannelA.show();
-				new WaitForUserDialog("Check A").show();
-				impChannelA.hide();
-				impChannelB.show();
-				new WaitForUserDialog("Check B").show();
-				impChannelB.hide();
-				
-				double [] valuesA = getPercentileValuesBySections (impChannelA, 5, 99.995);
-				double [] valuesB = getPercentileValuesBySections (impChannelB, 5, 99.995);
-				
-				// TODO Develop processing of files
+				/**
+				 * Iterate over the subTasks to determine the percentile values in the different regions of each image
+				 */
+				subTasks = subTasksPath.length;
+//				allValuesA = new double [subTasks][factorization*factorization];
+//				allValuesB = new double [subTasks][factorization*factorization];	
+				overSat = new boolean [subTasks];
+				for (int subTask = 0; subTask < subTasks; subTask++) {
+					// Check how many planes there are by checking how many folders with the name are in the folder
+					int nrOfPlanes = 0;
+					{
+						String[] fileList = new File(subTasksPath[subTasks].substring(0, subTasksPath[subTasks].lastIndexOf(subTasksName[subTasks])-1)).list();
+						
+						for (int f = 0; f < fileList.length; f++) {
+							if (fileList[f].endsWith(subTasksName[subTasks])) {
+								nrOfPlanes = 1;
+								break;
+							}else if (fileList[f].contains(subTasksName[subTasks] + "_Z")){
+								nrOfPlanes ++;
+							}
+						}
+
+						tmpMsg = "Found " + nrOfPlanes + " planes for file " + subTasksName[subTasks] + "!";
+						progress.updateBarText(tmpMsg);
+						if(extendedLogging)	progress.notifyMessage("subTasks " + (subTasks+1) + ": " + tmpMsg, ProgressDialog.LOG);
+					}
+									
+					// Open the channels to be analyzed
+					ImagePlus impChannelA = openChannel(subTasksPath [subTasks], subTasksName[subTasks], nrOfPlanes, (channelA-1), subTasks);
+					ImagePlus impChannelB = openChannel(subTasksPath [subTasks], subTasksName[subTasks], nrOfPlanes, (channelB-1), subTasks);
+					
+					impChannelA.show();
+					new WaitForUserDialog("Check A").show();
+					impChannelA.hide();
+					impChannelB.show();
+					new WaitForUserDialog("Check B").show();
+					impChannelB.hide();
+					
+					double [] valuesA = getPercentileValuesBySections (impChannelA, 5, 99.995);
+					impChannelA.changes = false;
+					impChannelA.close();
+					if(overSaturated(valuesA,Math.pow(2.0, impChannelA.getBitDepth())-1)) {
+						// TODO continue
+					}
+					
+					double [] valuesB = getPercentileValuesBySections (impChannelB, 5, 99.995);
+					impChannelB.changes = false;
+					impChannelB.close();
+					
+					/**
+					 * Decide on which channel is better
+					 */
+				}
 				
 				/**
 				 * Finish
@@ -543,5 +607,182 @@ public class LimsChannelSelector_Main implements PlugIn {
 		}
 		
 		return outValues;
+	}
+	
+	private String [] getImageFolderPathsInDirectory (File dir){
+		LinkedList<File> taskFiles = new LinkedList<File>();
+		taskFiles.add(dir);
+		String tmpMsg;
+		
+		tmpMsg = ("Now exploring " + dir.getAbsolutePath().substring(dir.getAbsolutePath().lastIndexOf(System.getProperty("file.separator"))) + " to find matching files...");
+		progress.updateBarText(tmpMsg);
+		if(extendedLogging)	progress.notifyMessage(tmpMsg, ProgressDialog.LOG);
+		
+		// Explore the directory and find images to be converted
+		int subTasks = taskFiles.size();
+					
+		for (int task = 0; task < subTasks; task++) {
+			String[] fileList = taskFiles.get(task).list();
+			for (int f = 0; f < fileList.length; f++) {
+				if (fileList[f].equals("metadata")) {
+					continue;
+				}
+				File fi = new File(taskFiles.get(task).getAbsolutePath() + System.getProperty("file.separator") + fileList[f]);
+				if(fi.isDirectory()) {
+					taskFiles.add(fi);
+					subTasks = taskFiles.size();
+				}
+			}
+		}
+					
+		String tempFile;
+		boolean withMetaData = false, omeTifFilesPresent = false, invalidFiles = false;
+		LinkedList<String> allFiles = new LinkedList<String>();
+		scanning: for (int task = 0; task < subTasks; task++) {
+			// Get all files in the folder
+			String[] fileList = taskFiles.get(task).list();
+
+			/**
+			 * Now, the script scans through all file names in the folder and verifies if
+			 * they are tif files and if so it checks whether they are named correctly and have the correct file ending.
+			 * _Z00_C00.ome.tif
+			 */
+			withMetaData = false;
+			omeTifFilesPresent = false;
+			invalidFiles = false;
+			for (int f = 0; f < fileList.length; f++) {
+				if (fileList[f].equals("metadata")) {
+					if(new File(taskFiles.get(task).getAbsolutePath() + System.getProperty("file.separator") + fileList[f] 
+							+ System.getProperty("file.separator") + "image.ome.xml").exists()) {
+						withMetaData = true;
+						break;
+					}else {
+						tmpMsg = (taskFiles.get(task).getAbsolutePath() + System.getProperty("file.separator") 
+							+ fileList[f] + " was skipped since metadata xml file was lacking!");
+						progress.updateBarText(tmpMsg);
+						if(extendedLogging)	progress.notifyMessage(tmpMsg, ProgressDialog.LOG);
+					}
+				}else if (fileList[f].endsWith(".ome.tif")) {
+					if (fileList[f].contains("_Z")) {
+						omeTifFilesPresent = true;
+					}else {
+						if(extendedLogging || logInitialFileScreening || logWholeOMEXMLComments) {
+							tmpMsg = ("" 
+									+ fileList[f]
+									+ " did not contain _Z and thus it will be skipped!");
+							progress.updateBarText(tmpMsg);
+							if(extendedLogging)	progress.notifyMessage(tmpMsg, ProgressDialog.LOG);
+						}
+						invalidFiles = true;
+						continue;
+					}
+				}else {
+					if(extendedLogging || logInitialFileScreening || logWholeOMEXMLComments) {
+						tmpMsg = ("" 
+								+ fileList[f]
+								+ " is neither a metadata folder nor an .ome.tif file and thus it will be skipped!");
+						progress.updateBarText(tmpMsg);
+						if(extendedLogging)	progress.notifyMessage(tmpMsg, ProgressDialog.LOG);
+					}
+					invalidFiles = true;						
+					continue;
+				}
+				
+			}
+			if (withMetaData == false) {
+				if(extendedLogging || logInitialFileScreening || logWholeOMEXMLComments) {
+					tmpMsg = (taskFiles.get(task).getName() + " was skipped since missing MetaData folder");
+					progress.updateBarText(tmpMsg);
+					if(extendedLogging)	progress.notifyMessage(tmpMsg, ProgressDialog.LOG);
+					continue scanning;
+				}
+			}
+			if (omeTifFilesPresent == false) {
+				if(extendedLogging || logInitialFileScreening || logWholeOMEXMLComments) {
+					tmpMsg = (taskFiles.get(task).getName() + " was skipped since no tif files present");
+					progress.updateBarText(tmpMsg);
+					if(extendedLogging)	progress.notifyMessage(tmpMsg, ProgressDialog.LOG);
+					continue scanning;
+				}
+			}
+			if (invalidFiles) {					
+					tmpMsg = ("WARNING: " + taskFiles.get(task).getName() + " contained files not matching file name requirements.");
+					progress.updateBarText(tmpMsg);
+					if(extendedLogging)	progress.notifyMessage(tmpMsg, ProgressDialog.LOG);
+			}
+
+			/**
+			 * Here it is checked whether an identically named file is already in the list
+			 * (otherwise would load each file again and again...
+			 */
+			tempFile = taskFiles.get(task).getAbsolutePath();
+			if(selectedInputType == inputType[0]) {
+				tempFile = tempFile.substring(0,tempFile.lastIndexOf("_Z"));
+			}
+						
+			//Decide by image
+			for (int ff = 0; ff < allFiles.size(); ff++) {
+				if (allFiles.get(ff).equals(tempFile)) {
+					continue scanning;
+				}
+			}			
+
+			// Copy new files to all files list
+			allFiles.add(tempFile);
+						
+			if(extendedLogging || logInitialFileScreening || logWholeOMEXMLComments) {
+				tmpMsg = ("ACCEPTED: " + tempFile);
+				progress.updateBarText(tmpMsg);
+				if(extendedLogging)	progress.notifyMessage(tmpMsg, ProgressDialog.LOG);
+			}
+		}
+		
+		// Generate arrays based on unique names
+		subTasks = allFiles.size();
+		String fullPaths [] = new String[subTasks];
+		for (int task = 0; task < allFiles.size(); task++) {
+			tempFile = allFiles.get(task);
+			fullPaths[task] = tempFile;
+			if(extendedLogging || logInitialFileScreening || logWholeOMEXMLComments) {
+				tmpMsg = ("FULL PATH to be submitted: " + fullPaths[task]);
+				progress.updateBarText(tmpMsg);
+				if(extendedLogging)	progress.notifyMessage(tmpMsg, ProgressDialog.LOG);
+			}
+		}
+		allFiles.clear();
+		allFiles = null;
+					
+		if (subTasks == 0) {
+			tmpMsg = ("No acceptable folders found in " + dir + "!");
+			progress.updateBarText(tmpMsg);
+			if(extendedLogging)	progress.notifyMessage(tmpMsg, ProgressDialog.NOTIFICATION);
+		}
+		return fullPaths;		
+	}
+	
+	private static boolean overSaturated (double [] values, double satValue) {
+		if(values.length == 1) {
+			if(values[0] >= satValue) {
+				return true;
+			}else {
+				return false;
+			}				
+		}
+		
+		Arrays.sort(values);
+		
+		if(values.length % 2 == 0) {
+			if((values[(int)(values.length/2.0)-1]+values[(int)(values.length/2.0)])/2.0 >= satValue) {
+				return true;
+			}else {
+				return false;
+			}	
+		}else {
+			if(values[(int)(values.length/2.0)] >= satValue) {
+				return true;
+			}else {
+				return false;
+			}
+		}
 	}
 }// end main class
