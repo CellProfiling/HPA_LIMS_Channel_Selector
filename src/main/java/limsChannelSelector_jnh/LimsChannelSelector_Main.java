@@ -128,7 +128,7 @@ public class LimsChannelSelector_Main implements PlugIn {
 	// Developer variables
 	static final boolean LOGPOSITIONCONVERSIONFORDIAGNOSIS = false;// This fixed variable is just used when working on the code and to retrieve certain log output only
 	static final boolean LOGZDISTFINDING = false;// This fixed variable is just used when working on the code and to retrieve certain log output only
-	int factorization = 5;
+	int factorization = 3;
 	double percentile = 99.995;
 	
 	
@@ -400,7 +400,7 @@ public class LimsChannelSelector_Main implements PlugIn {
 		String subTasksPath [] = new String [0];
 		String subTasksName [] = new String [0];
 //		double allValuesA [][], allValuesB [][];
-		boolean overSat [];
+		boolean overSatA [], overSatB [], chooseA [];
 				
 		for (int task = 0; task < tasks; task++) {
 			running: while (continueProcessing) {
@@ -430,52 +430,97 @@ public class LimsChannelSelector_Main implements PlugIn {
 				subTasks = subTasksPath.length;
 //				allValuesA = new double [subTasks][factorization*factorization];
 //				allValuesB = new double [subTasks][factorization*factorization];	
-				overSat = new boolean [subTasks];
+				overSatA = new boolean [subTasks];
+				overSatB = new boolean [subTasks];
+				chooseA = new boolean [subTasks];
+				
 				for (int subTask = 0; subTask < subTasks; subTask++) {
 					// Check how many planes there are by checking how many folders with the name are in the folder
 					int nrOfPlanes = 0;
 					{
-						String[] fileList = new File(subTasksPath[subTasks].substring(0, subTasksPath[subTasks].lastIndexOf(subTasksName[subTasks])-1)).list();
+						String[] fileList = new File(subTasksPath[subTask].substring(0, subTasksPath[subTask].lastIndexOf(subTasksName[subTask])-1)).list();
 						
 						for (int f = 0; f < fileList.length; f++) {
-							if (fileList[f].endsWith(subTasksName[subTasks])) {
+							if (fileList[f].endsWith(subTasksName[subTask])) {
 								nrOfPlanes = 1;
 								break;
-							}else if (fileList[f].contains(subTasksName[subTasks] + "_Z")){
+							}else if (fileList[f].contains(subTasksName[subTask] + "_Z")){
 								nrOfPlanes ++;
 							}
 						}
 
-						tmpMsg = "Found " + nrOfPlanes + " planes for file " + subTasksName[subTasks] + "!";
+						tmpMsg = "Found " + nrOfPlanes + " planes for file " + subTasksName[subTask] + "!";
 						progress.updateBarText(tmpMsg);
-						if(extendedLogging)	progress.notifyMessage("subTasks " + (subTasks+1) + ": " + tmpMsg, ProgressDialog.LOG);
+						if(extendedLogging)	progress.notifyMessage("subTasks " + (subTask+1) + ": " + tmpMsg, ProgressDialog.LOG);
 					}
 									
-					// Open the channels to be analyzed
-					ImagePlus impChannelA = openChannel(subTasksPath [subTasks], subTasksName[subTasks], nrOfPlanes, (channelA-1), subTasks);
-					ImagePlus impChannelB = openChannel(subTasksPath [subTasks], subTasksName[subTasks], nrOfPlanes, (channelB-1), subTasks);
+					// Open the channels to be analysed
+					ImagePlus impChannelA = openChannel(subTasksPath [subTask], subTasksName[subTask], nrOfPlanes, (channelA-1), subTasks);
+					ImagePlus impChannelB = openChannel(subTasksPath [subTask], subTasksName[subTask], nrOfPlanes, (channelB-1), subTasks);
 					
 					impChannelA.show();
 					new WaitForUserDialog("Check A").show();
 					impChannelA.hide();
+					
 					impChannelB.show();
 					new WaitForUserDialog("Check B").show();
 					impChannelB.hide();
 					
-					double [] valuesA = getPercentileValuesBySections (impChannelA, 5, 99.995);
+					double [] valuesA = getPercentileValuesBySections (impChannelA, factorization, percentile);
 					impChannelA.changes = false;
 					impChannelA.close();
-					if(overSaturated(valuesA,Math.pow(2.0, impChannelA.getBitDepth())-1)) {
-						// TODO continue
-					}
 					
-					double [] valuesB = getPercentileValuesBySections (impChannelB, 5, 99.995);
+					double [] valuesB = getPercentileValuesBySections (impChannelB, factorization, percentile);
 					impChannelB.changes = false;
 					impChannelB.close();
 					
-					/**
-					 * Decide on which channel is better
-					 */
+					// Get median values from the different image regions and check for oversaturation
+					double valueA = getMedian(valuesA);					
+					double valueB = getMedian(valuesB);
+					
+					if(valueA >= Math.pow(2.0, impChannelA.getBitDepth())-1) {
+						overSatA [subTask] = true;
+					}else {
+						overSatA [subTask] = false;
+					}
+					
+					if(valueB >= Math.pow(2.0, impChannelB.getBitDepth())-1) {
+						overSatB [subTask] = true;
+					}else {
+						overSatB [subTask] = false;
+					}
+					
+					//Decide based on oversaturation
+					if(overSatA [subTask] && overSatB [subTask]) {
+						if(getMin(valuesA) < getMin(valuesB)) {
+							chooseA[subTask] = true;
+						}else {
+							chooseA[subTask] = false;
+						}
+					}else if(valueA > valueB) {
+						chooseA [subTask] = true;
+						if(overSatA [subTask]){
+							chooseA [subTask] = false;
+						}
+					}else {						
+						chooseA [subTask] = false;
+						if(overSatB [subTask]){
+							chooseA [subTask] = true;
+						}
+					}
+					
+					tmpMsg = "Decision: Selected channel ";
+					if(chooseA [subTask]){
+						tmpMsg += "A";
+					}else{
+						tmpMsg += "B";
+					}
+					tmpMsg += ". Reasons: A Oversat.?:" + overSatA [subTask] + "."
+							+ " B Oversat.?:" + overSatB [subTask] + "."
+							+ " Value A: " + valueA + "."
+							+ " Value B: " + valueB + ".";
+					progress.updateBarText(tmpMsg);
+					if(extendedLogging)	progress.notifyMessage("subTasks " + (subTask+1) + ": " + tmpMsg, ProgressDialog.LOG);
 				}
 				
 				/**
@@ -552,7 +597,7 @@ public class LimsChannelSelector_Main implements PlugIn {
 		return imp;
 	}
 	
-	private double [] getPercentileValuesBySections (ImagePlus imp, int sectionFactor, double percentile) {
+	private double [] getPercentileValuesBySections (ImagePlus imp, int sectionFactor, double chosenPercentile) {
 		int width = imp.getWidth();
 		int height = imp.getHeight();
 		
@@ -588,9 +633,9 @@ public class LimsChannelSelector_Main implements PlugIn {
 //				}
 //			}
 			
-			index = (int)Math.round(sectionLists.get(i).size()*(percentile/100.0))-1;
+			index = (int)Math.round(sectionLists.get(i).size()*(chosenPercentile/100.0))-1;
 			outValues [i] = sectionLists.get(i).get(index);
-			if(extendedLogging) progress.notifyMessage("For section " + (i+1) + " the " + percentile + " value was "
+			if(extendedLogging) progress.notifyMessage("For section " + (i+1) + " the " + chosenPercentile + " value was "
 					+ outValues [i]
 					+ ", determined at index " + index + " for a list of size " + sectionLists.get(i).size(),
 					ProgressDialog.LOG);
@@ -760,29 +805,82 @@ public class LimsChannelSelector_Main implements PlugIn {
 		return fullPaths;		
 	}
 	
-	private static boolean overSaturated (double [] values, double satValue) {
+	private boolean overSaturatedMedian (double [] values, double satValue) {
+		double value = 0.0;
 		if(values.length == 1) {
-			if(values[0] >= satValue) {
-				return true;
-			}else {
-				return false;
-			}				
+			value = values [0];
+		}else {
+			Arrays.sort(values);			
 		}
-		
-		Arrays.sort(values);
 		
 		if(values.length % 2 == 0) {
-			if((values[(int)(values.length/2.0)-1]+values[(int)(values.length/2.0)])/2.0 >= satValue) {
-				return true;
-			}else {
-				return false;
-			}	
+			value = (values[(int)(values.length/2.0)-1]+values[(int)(values.length/2.0)])/2.0;
 		}else {
-			if(values[(int)(values.length/2.0)] >= satValue) {
-				return true;
+			value = values[(int)(values.length/2.0)];
+			
+		}
+		
+		if(value >= satValue) {
+			String tmpMsg = ("Oversaturation test: " + true + ". Value: " + value
+					+ ". SatValue: " + satValue + ". From all values: ");
+			for(int i = 0; i < values.length; i++) {
+				tmpMsg += values [i] + ";";
+			}
+			progress.updateBarText(tmpMsg);
+			if(extendedLogging)	progress.notifyMessage(tmpMsg, ProgressDialog.LOG);	
+			return true;
+		}else {
+			String tmpMsg = ("Oversaturation test: " + false + ". Value: " + value
+					+ ". SatValue: " + satValue + ". From all values: ");
+			for(int i = 0; i < values.length; i++) {
+				tmpMsg += values [i] + ";";
+			}
+			progress.updateBarText(tmpMsg);
+			if(extendedLogging)	progress.notifyMessage(tmpMsg, ProgressDialog.LOG);	
+			return false;
+		}
+	}
+	
+	private double getMedian (double [] values) {
+		double value = 0.0;
+		if(values.length == 1) {
+			value = values [0];
+		}else {
+			Arrays.sort(values);
+			if(values.length % 2 == 0) {
+				value = (values[(int)(values.length/2.0)-1]+values[(int)(values.length/2.0)])/2.0;
 			}else {
-				return false;
+				value = values[(int)(values.length/2.0)];				
 			}
 		}
+		if(extendedLogging) {
+			String tmpMsg = ("Median value: " + value
+					+ ". All values: ");
+			for(int i = 0; i < values.length; i++) {
+				tmpMsg += values [i] + ";";
+			}
+			progress.updateBarText(tmpMsg);
+			progress.notifyMessage(tmpMsg, ProgressDialog.LOG);
+		}
+		return value;
+	}
+	
+
+	private double getMin (double [] values) {
+		double value = 0.0;
+		if(values.length > 1) {
+			Arrays.sort(values);
+		}
+		value = values [0];
+
+		if(extendedLogging) {
+			String tmpMsg = ("Min value: " + value
+					+ ". All values: ");
+			for(int i = 0; i < values.length; i++) {
+				tmpMsg += values [i] + ";";
+			}
+			progress.updateBarText(tmpMsg);	progress.notifyMessage(tmpMsg, ProgressDialog.LOG);	
+		}		
+		return value;
 	}
 }// end main class
