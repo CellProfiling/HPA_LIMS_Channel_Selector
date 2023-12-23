@@ -23,6 +23,7 @@ package limsChannelSelector_jnh;
 import java.awt.Font;
 import java.awt.event.WindowEvent;
 import java.io.File;
+import java.io.IOException;
 import java.text.DecimalFormat;
 import java.text.DecimalFormatSymbols;
 import java.text.SimpleDateFormat;
@@ -36,8 +37,10 @@ import java.util.Locale;
 import javax.xml.xpath.XPathFactory;
 import javax.xml.xpath.XPath;
 
+import org.apache.commons.io.FileUtils;
 import org.w3c.dom.Document;
 import org.w3c.dom.Node;
+
 import ij.IJ;
 import ij.ImagePlus;
 import ij.ImageStack;
@@ -129,7 +132,7 @@ public class LimsChannelSelector_Main implements PlugIn {
 	static final boolean LOGPOSITIONCONVERSIONFORDIAGNOSIS = false;// This fixed variable is just used when working on the code and to retrieve certain log output only
 	static final boolean LOGZDISTFINDING = false;// This fixed variable is just used when working on the code and to retrieve certain log output only
 	int factorization = 3;
-	double percentile = 99.995;
+	double percentile = 99.9995;
 	
 	
 	@Override
@@ -433,6 +436,7 @@ public class LimsChannelSelector_Main implements PlugIn {
 				overSatA = new boolean [subTasks];
 				overSatB = new boolean [subTasks];
 				chooseA = new boolean [subTasks];
+				int chosenImagesA = 0;
 				
 				for (int subTask = 0; subTask < subTasks; subTask++) {
 					// Check how many planes there are by checking how many folders with the name are in the folder
@@ -523,6 +527,30 @@ public class LimsChannelSelector_Main implements PlugIn {
 					if(extendedLogging)	progress.notifyMessage("subTasks " + (subTask+1) + ": " + tmpMsg, ProgressDialog.LOG);
 				}
 				
+				chosenImagesA = 0;
+				for (int subTask = 0; subTask < subTasks; subTask++) {
+					if(chooseA [subTask]) chosenImagesA++;
+				}
+				
+				/**
+				 * Check which channel is preferred for 50% of the images
+				 */
+				if(chosenImagesA >= subTasks/2.0) {
+					tmpMsg += "Channel A (ID " + channelA + ") was selected because "
+							+ chosenImagesA + " of " + subTasks + " images were better in this channel.";
+					progress.updateBarText(tmpMsg);
+					if(extendedLogging)	progress.notifyMessage("Task " + (task+1) + ": " + tmpMsg, ProgressDialog.LOG);
+					
+					moveAndRemoveChannel(subTasksPath, subTasksName, outPath, channelB);
+				}else {
+					tmpMsg += "Channel B (ID " + channelA + ") was selected because "
+							+ (subTasks-chosenImagesA) + " of " + subTasks + " images were better in this channel.";
+					progress.updateBarText(tmpMsg);
+					if(extendedLogging)	progress.notifyMessage("Task " + (task+1) + ": " + tmpMsg, ProgressDialog.LOG);
+
+					moveAndRemoveChannel(subTasksPath, subTasksName, outPath, channelA);				
+				}
+				
 				/**
 				 * Finish
 				 */
@@ -541,9 +569,9 @@ public class LimsChannelSelector_Main implements PlugIn {
 	 * @param name
 	 * @param nrOfPlanes
 	 * @param channel: 0 <= channel < nrOfChannels
-	 * @param task
+	 * @param subTask
 	 */	
-	private ImagePlus openChannel(String filePathPrefix, String name, int nrOfPlanes, int channel, int task) {
+	private ImagePlus openChannel(String filePathPrefix, String name, int nrOfPlanes, int channel, int subTask) {
 		ImagePlus imp = null;
 		String channelString = "0", planeString = "0", tempString = "";
 		if(channel > 9) {
@@ -557,7 +585,7 @@ public class LimsChannelSelector_Main implements PlugIn {
 			
 			String tmpMsg = "Opening " + name + " (" +  tempString + ")...";
 			progress.updateBarText(tmpMsg);
-			if(extendedLogging)	progress.notifyMessage("Task " + (task+1) + ": " + tmpMsg, ProgressDialog.LOG);
+			if(extendedLogging)	progress.notifyMessage("subTask " + (subTask+1) + ": " + tmpMsg, ProgressDialog.LOG);
 			
 			imp = IJ.openImage(tempString);
 		}else {
@@ -577,7 +605,7 @@ public class LimsChannelSelector_Main implements PlugIn {
 				
 				String tmpMsg = "Opening " + name + "_Z" + planeString + "_C" + channelString + ".ome.tif" + " (" +  tempString + ")...";
 				progress.updateBarText(tmpMsg);
-				if(extendedLogging)	progress.notifyMessage("Task " + (task+1) + ": " + tmpMsg, ProgressDialog.LOG);
+				if(extendedLogging)	progress.notifyMessage("subTask " + (subTask+1) + ": " + tmpMsg, ProgressDialog.LOG);
 				
 				imp = IJ.openImage(tempString);
 				
@@ -882,5 +910,147 @@ public class LimsChannelSelector_Main implements PlugIn {
 			progress.updateBarText(tmpMsg);	progress.notifyMessage(tmpMsg, ProgressDialog.LOG);	
 		}		
 		return value;
+	}
+	
+	/**
+	 * @param channelIDToRemove: 1-based
+	 */
+	private void moveAndRemoveChannel(String [] subTasksPath, String [] subTasksName, String outFolder, int channelIDToRemove) {
+		int subTasks = subTasksPath.length;
+		String tmpMsg;
+		
+		tasking: for (int subTask = 0; subTask < subTasks; subTask++) {
+			// Check how many planes there are by checking how many folders with the name are in the folder
+			int nrOfPlanes = 0;
+			{
+				String[] fileList = new File(subTasksPath[subTask].substring(0, subTasksPath[subTask].lastIndexOf(subTasksName[subTask])-1)).list();
+				
+				for (int f = 0; f < fileList.length; f++) {
+					if (fileList[f].endsWith(subTasksName[subTask])) {
+						nrOfPlanes = 1;
+						break;
+					}else if (fileList[f].contains(subTasksName[subTask] + "_Z")){
+						nrOfPlanes ++;
+					}
+				}
+
+				tmpMsg = "Found " + nrOfPlanes + " planes for file " + subTasksName[subTask] + "!";
+				progress.updateBarText(tmpMsg);
+				if(extendedLogging)	progress.notifyMessage("subTasks " + (subTask+1) + ": " + tmpMsg, ProgressDialog.LOG);
+			}
+			
+			// Check how many channels there are
+			int nrOfChannels = 0;
+			{
+				String[] fileList = new File(subTasksPath[subTask]).list();
+				
+				for (int f = 0; f < fileList.length; f++) {
+					if (fileList[f].endsWith(".ome.tif") && fileList[f].contains(subTasksName[subTask] + "_Z") && fileList[f].contains("_C")) {
+						nrOfChannels++;
+					}
+				}
+				
+				/**
+				 * Sanity check, all channels available
+				 */
+				String path;
+				for(int p = 0; p < nrOfPlanes; p++){
+					for(int c = 0; c < nrOfChannels; c++){
+						path = subTasksPath [subTask];
+						if(p < 10) {
+							path += "_Z0" + p;
+						}else {
+							path += "_Z" + p;							
+						}
+						if(c < 10) {
+							path += "_C0" + c;
+						}else {
+							path += "_C" + c;							
+						}
+						path += ".ome.tif";
+						
+						if(!new File(path).exists()) {
+							tmpMsg = "ERROR: Channel " + (c+1) + " was missing in " + subTasksPath[subTask] + "!";
+							progress.notifyMessage("subTasks " + (subTask+1) + ": " + tmpMsg, ProgressDialog.ERROR);
+							continue tasking;
+						}
+					}	
+				}
+				
+				tmpMsg = "Found " + nrOfPlanes + " channels for file " + subTasksName[subTask] + "!";
+				progress.updateBarText(tmpMsg);
+				if(extendedLogging)	progress.notifyMessage("subTasks " + (subTask+1) + ": " + tmpMsg, ProgressDialog.LOG);
+			}
+
+			// Copy files
+			{
+				String path, outFilePath;
+				int newChannelID;
+				for(int p = 0; p < nrOfPlanes; p++){
+					for(int c = 0; c < nrOfChannels; c++){
+						if((c + 1) == channelIDToRemove) {
+							continue;
+						}
+						if((c + 1) > channelIDToRemove) {
+							newChannelID = c-1;
+						}else {
+							newChannelID = c;
+						}
+						
+						path = subTasksPath [subTask];
+						if(p < 10) {
+							path += "_Z0" + p;
+						}else {
+							path += "_Z" + p;							
+						}
+						if(c < 10) {
+							path += "_C0" + c;
+						}else {
+							path += "_C" + c;							
+						}
+						path += ".ome.tif";
+						
+						outFilePath = outFolder;
+						//TODO Add well folder to outFilePath;
+						outFilePath += subTasksName [subTask];
+						if(p < 10) {
+							path += "_Z0" + p;
+						}else {
+							path += "_Z" + p;							
+						}						
+						if(newChannelID < 10) {
+							path += "_C0" + newChannelID;
+						}else {
+							path += "_C" + newChannelID;							
+						}
+						path += ".ome.tif";
+						
+						// Copy
+						File srcFile = new File(path);
+						File destFile = new File(outFilePath);
+						if(destFile.exists()) {
+							progress.notifyMessage("subTask " + (subTask + 1) + "/" + tasks + ": " 
+									+ "There are identical images in the target folder. Did not overwrite the image: " + outFilePath, ProgressDialog.ERROR);
+							continue;
+						}
+						try {
+							FileUtils.copyFile(srcFile, destFile, true);
+						} catch (IOException e) {
+							// TODO Write full error declaration and add notification
+							e.printStackTrace();
+						}
+					}	
+				}
+			}
+			
+			// Correct tif comment
+			{
+				
+			}
+			
+			// Finish
+		}
+		
+		
 	}
 }// end main class
