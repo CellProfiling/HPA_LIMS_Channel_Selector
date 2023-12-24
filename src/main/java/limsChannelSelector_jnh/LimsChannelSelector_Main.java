@@ -47,6 +47,13 @@ import ij.ImageStack;
 import ij.gui.GenericDialog;
 import ij.gui.WaitForUserDialog;
 import ij.plugin.PlugIn;
+import loci.common.RandomAccessInputStream;
+import loci.common.services.ServiceFactory;
+import loci.formats.FormatException;
+import loci.formats.ome.OMEXMLMetadata;
+import loci.formats.services.OMEXMLService;
+import loci.formats.tiff.TiffParser;
+import loci.formats.tiff.TiffSaver;
 
 public class LimsChannelSelector_Main implements PlugIn {
 	// Name variables
@@ -997,6 +1004,7 @@ public class LimsChannelSelector_Main implements PlugIn {
 							newChannelID = c;
 						}
 						
+						//Determine input file path
 						path = subTasksPath [subTask];
 						if(p < 10) {
 							path += "_Z0" + p;
@@ -1010,20 +1018,38 @@ public class LimsChannelSelector_Main implements PlugIn {
 						}
 						path += ".ome.tif";
 						
-						outFilePath = outFolder;
-						//TODO Add well folder to outFilePath;
+						//Determine output file path
+						outFilePath = subTasksPath [subTask].substring(0,subTasksPath [subTask].lastIndexOf(subTasksName [subTask])-1);
+						outFilePath = subTasksPath [subTask].substring(0,subTasksPath [subTask].lastIndexOf(subTasksName [subTask])-1);
+						outFilePath = outFilePath.substring(outFilePath.lastIndexOf(System.getProperty("file.path")));
+						outFilePath = outFolder + (System.getProperty("file.path")) + outFilePath + (System.getProperty("file.path"));
+						
+						outFilePath += subTasksName [subTask] + (System.getProperty("file.path"));
+						if(nrOfPlanes > 1) {
+							if(p < 10) {
+								outFilePath += "_Z0" + p;
+							}else {
+								outFilePath += "_Z" + p;							
+							}
+						}
+						if(!new File(outFilePath).exists()) {
+							new File(outFilePath).mkdirs();
+						}
+						
 						outFilePath += subTasksName [subTask];
 						if(p < 10) {
-							path += "_Z0" + p;
+							outFilePath += "_Z0" + p;
 						}else {
-							path += "_Z" + p;							
-						}						
-						if(newChannelID < 10) {
-							path += "_C0" + newChannelID;
-						}else {
-							path += "_C" + newChannelID;							
+							outFilePath += "_Z" + p;							
 						}
-						path += ".ome.tif";
+						if(newChannelID < 10) {
+							outFilePath += "_C0" + newChannelID;
+						}else {
+							outFilePath += "_C" + newChannelID;							
+						}
+						outFilePath += ".ome.tif";
+
+						IJ.log("In:" + subTasksPath [subTask] + "\nOut:" + outFilePath); // TODO
 						
 						// Copy
 						File srcFile = new File(path);
@@ -1036,21 +1062,157 @@ public class LimsChannelSelector_Main implements PlugIn {
 						try {
 							FileUtils.copyFile(srcFile, destFile, true);
 						} catch (IOException e) {
-							// TODO Write full error declaration and add notification
-							e.printStackTrace();
+							String out = "";
+							for (int err = 0; err < e.getStackTrace().length; err++) {
+								out += " \n " + e.getStackTrace()[err].toString();
+							}
+							progress.notifyMessage("IO-ERROR when trying to copy tiff file from " + srcFile.getAbsolutePath() + " to " + destFile.getAbsolutePath() +  "." 
+									+ "\nError message: " + e.getMessage()
+									+ "\nError localized message: " + e.getLocalizedMessage()
+									+ "\nError cause: " + e.getCause() 
+									+ "\nDetailed message:"
+									+ "\n" + out,
+									ProgressDialog.ERROR);
+						}
+						
+						// Correct tif comment
+						{
+							if(!removeChannelFromOMEXML(destFile.getAbsolutePath())) {
+								//TODO add what to do if it fails.
+							}
 						}
 					}	
 				}
 			}
 			
-			// Correct tif comment
-			{
-				
-			}
+			
 			
 			// Finish
 		}
 		
+		
+	}
+	
+	/**
+	 * TODO
+	 * @param path
+	 * @param channel, to be removed
+	 * @return true if channel was successfully removed from the OME metadata
+	 */
+	private boolean removeChannelFromOMEXML (String path, int channel) {
+		String comment = "";
+		/**
+		 * Reading the TIFF comment = OME XML Metadata
+		 */
+		try {
+			comment = getTiffComment(path);
+		} catch (IOException e) {
+			String out = "";
+			for (int err = 0; err < e.getStackTrace().length; err++) {
+				out += " \n " + e.getStackTrace()[err].toString();
+			}
+			progress.notifyMessage("IO-ERROR when trying to read the tiff comment from " + path + "." 
+					+ "\nError message: " + e.getMessage()
+					+ "\nError localized message: " + e.getLocalizedMessage()
+					+ "\nError cause: " + e.getCause() 
+					+ "\nDetailed message:"
+					+ "\n" + out,
+					ProgressDialog.ERROR);
+			return false;
+		}
+		
+		/**
+		 * Creating an xml document out of it TODO
+		 */
+		
+		
+//		/**
+//		 * Modifying comment
+//		 */
+//		progress.updateBarText("Generate metadata store from tiff comment for image " + omeTifFileName);
+//		ServiceFactory factory = new ServiceFactory();
+//		OMEXMLService service = factory.getInstance(OMEXMLService.class);
+//		OMEXMLMetadata meta = service.createOMEXMLMetadata(comment);
+//		
+//		/**
+//		 * Check whether there is more than one image and then find out image ID
+//		 */
+//		if(meta.getImageCount() > 1) {
+//			progress.notifyMessage("Image " + metadataFilePath + " - OME XML Annotation features more than one image. Unclear which image is meant!",
+//					ProgressDialog.ERROR);
+//			continue;
+//		}
+//		int imageIndex = 0;
+//		String imageID = meta.getImageID(imageIndex);
+//		if(extendedLogging){
+//			progress.notifyMessage("Image " + metadataFilePath + ". Fetched imageId: " + imageID + ".", ProgressDialog.LOG);
+//		}
+				
+		/**
+		 * Saving the modified comment
+		 */
+		try {
+			replaceTiffCommentInFile(path, comment);
+		} catch (IOException e) {
+			String out = "";
+			for (int err = 0; err < e.getStackTrace().length; err++) {
+				out += " \n " + e.getStackTrace()[err].toString();
+			}
+			progress.notifyMessage("IO-ERROR when trying to replace the tiff comment in " + path + "." 
+					+ "\nError message: " + e.getMessage()
+					+ "\nError localized message: " + e.getLocalizedMessage()
+					+ "\nError cause: " + e.getCause() 
+					+ "\nDetailed message:"
+					+ "\n" + out,
+					ProgressDialog.ERROR);
+			return false;
+		} catch (FormatException e) {
+			String out = "";
+			for (int err = 0; err < e.getStackTrace().length; err++) {
+				out += " \n " + e.getStackTrace()[err].toString();
+			}
+			progress.notifyMessage("FORMAT-ERROR when trying to replace the tiff comment in" + path + "." 
+					+ "\nError message: " + e.getMessage()
+					+ "\nError localized message: " + e.getLocalizedMessage()
+					+ "\nError cause: " + e.getCause() 
+					+ "\nDetailed message:"
+					+ "\n" + out,
+					ProgressDialog.ERROR);
+			return false;
+		}
+		
+		return true;
+	}
+	
+	/**
+	 * Open the tif at @param file and @return the tif comment (= OME XML String)
+	 * @throws IOException 
+	 * */
+	private String getTiffComment(String path) throws IOException {
+		progress.updateBarText("Retrieving tif comment from " + path + ")");
+		TiffParser tp = new TiffParser(path);
+		String comment = "" + tp.getComment();
+		tp = null;
+		System.gc();
+		return comment;
+	}
+			
+	/**
+	 * @param path: The absolute file path to the tiff file, whose tiff comment shall be replaced with the new @param comment
+	 * @throws IOException when TiffSave or InputStream or overwriting the comment fails due to an IOException
+	 * @throws FormatException when TiffSaver fails to overwrite the Tiff comment
+	 */
+	private void replaceTiffCommentInFile (String path, String comment) throws IOException, FormatException {
+		/**
+		 * Saving modified omexml tif comment into copied image
+		 * */
+		progress.updateBarText("Saving modified tif comment into file " + path + ")");
+		TiffSaver saver = new TiffSaver(path);
+	    RandomAccessInputStream in = new RandomAccessInputStream(path);
+	    saver.overwriteComment(in, comment);
+		in.close();
+		progress.updateBarText("Saving " + path + " done!");
+		if(extendedLogging)	progress.notifyMessage("Saved " + path, ProgressDialog.LOG);
 		
 	}
 }// end main class
