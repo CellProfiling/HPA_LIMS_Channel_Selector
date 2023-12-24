@@ -1077,7 +1077,7 @@ public class LimsChannelSelector_Main implements PlugIn {
 						
 						// Correct tif comment
 						{
-							if(!removeChannelFromOMEXML(destFile.getAbsolutePath())) {
+							if(!removeChannelFromOMEXML(destFile.getAbsolutePath(), channelIDToRemove)) {
 								//TODO add what to do if it fails.
 							}
 						}
