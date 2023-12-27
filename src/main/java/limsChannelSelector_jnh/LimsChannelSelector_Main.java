@@ -23,7 +23,9 @@ package limsChannelSelector_jnh;
 import java.awt.Font;
 import java.awt.event.WindowEvent;
 import java.io.File;
+import java.io.FileWriter;
 import java.io.IOException;
+import java.io.StringReader;
 import java.text.DecimalFormat;
 import java.text.DecimalFormatSymbols;
 import java.text.SimpleDateFormat;
@@ -35,11 +37,22 @@ import java.util.LinkedList;
 import java.util.Locale;
 
 import javax.xml.xpath.XPathFactory;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
+import javax.xml.transform.OutputKeys;
+import javax.xml.transform.TransformerConfigurationException;
+import javax.xml.transform.TransformerException;
+import javax.xml.transform.TransformerFactory;
+import javax.xml.transform.dom.DOMSource;
+import javax.xml.transform.stream.StreamResult;
 import javax.xml.xpath.XPath;
 
 import org.apache.commons.io.FileUtils;
 import org.w3c.dom.Document;
 import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
+import org.xml.sax.SAXException;
 
 import ij.IJ;
 import ij.ImagePlus;
@@ -91,7 +104,8 @@ public class LimsChannelSelector_Main implements PlugIn {
 	boolean extendedLogging = false;
 	boolean logInitialFileScreening = false;
 	boolean logWholeOMEXMLComments = false;
-		
+	
+	
 	String outPath = "E:" + System.getProperty("file.separator") + System.getProperty("file.separator") + "Selected Channels"
 			+ System.getProperty("file.separator");
 	
@@ -104,8 +118,7 @@ public class LimsChannelSelector_Main implements PlugIn {
 	String selectedDecisionType = decisionType [0];
 	
 	// -----------------define params for Dialog-----------------
-	
-	
+		
 	//TODO Remove unused variables
 	// Temporary variables used for the original metadata file
 	String loadedSrcMetadataFilePath = "";
@@ -460,22 +473,22 @@ public class LimsChannelSelector_Main implements PlugIn {
 							}
 						}
 
-						tmpMsg = "Found " + nrOfPlanes + " planes for file " + subTasksName[subTask] + "!";
+						tmpMsg = "Found " + nrOfPlanes + " planes for file " + subTasksName[subTask] + " (subTask " + subTask + " / " + subTasks + ")!";
 						progress.updateBarText(tmpMsg);
 						if(extendedLogging)	progress.notifyMessage("subTasks " + (subTask+1) + ": " + tmpMsg, ProgressDialog.LOG);
 					}
 									
 					// Open the channels to be analysed
-					ImagePlus impChannelA = openChannel(subTasksPath [subTask], subTasksName[subTask], nrOfPlanes, (channelA-1), subTasks);
-					ImagePlus impChannelB = openChannel(subTasksPath [subTask], subTasksName[subTask], nrOfPlanes, (channelB-1), subTasks);
+					ImagePlus impChannelA = openChannel(subTasksPath [subTask], subTasksName[subTask], nrOfPlanes, (channelA-1), subTask);
+					ImagePlus impChannelB = openChannel(subTasksPath [subTask], subTasksName[subTask], nrOfPlanes, (channelB-1), subTask);
 					
-					impChannelA.show();
-					new WaitForUserDialog("Check A").show();
-					impChannelA.hide();
-					
-					impChannelB.show();
-					new WaitForUserDialog("Check B").show();
-					impChannelB.hide();
+//					impChannelA.show();
+//					new WaitForUserDialog("Check A").show();
+//					impChannelA.hide();
+//					
+//					impChannelB.show();
+//					new WaitForUserDialog("Check B").show();
+//					impChannelB.hide();
 					
 					double [] valuesA = getPercentileValuesBySections (impChannelA, factorization, percentile);
 					impChannelA.changes = false;
@@ -536,7 +549,9 @@ public class LimsChannelSelector_Main implements PlugIn {
 				
 				chosenImagesA = 0;
 				for (int subTask = 0; subTask < subTasks; subTask++) {
-					if(chooseA [subTask]) chosenImagesA++;
+					if(chooseA [subTask]) {
+						chosenImagesA++;
+					}
 				}
 				
 				/**
@@ -950,6 +965,9 @@ public class LimsChannelSelector_Main implements PlugIn {
 			int nrOfChannels = 0;
 			{
 				String[] fileList = new File(subTasksPath[subTask]).list();
+				if(!new File(subTasksPath[subTask]).exists()) {
+					fileList = new File(subTasksPath[subTask] + "_Z00").list();
+				}
 				
 				for (int f = 0; f < fileList.length; f++) {
 					if (fileList[f].endsWith(".ome.tif") && fileList[f].contains(subTasksName[subTask] + "_Z") && fileList[f].contains("_C")) {
@@ -964,11 +982,23 @@ public class LimsChannelSelector_Main implements PlugIn {
 				for(int p = 0; p < nrOfPlanes; p++){
 					for(int c = 0; c < nrOfChannels; c++){
 						path = subTasksPath [subTask];
+						
+						if(!new File(path).exists()) {
+							if(p < 10) {
+								path += "_Z0" + p;
+							}else {
+								path += "_Z" + p;							
+							}
+						}
+						
+						path += System.getProperty("file.separator") + subTasksPath [subTask];
+						
 						if(p < 10) {
 							path += "_Z0" + p;
 						}else {
 							path += "_Z" + p;							
 						}
+						
 						if(c < 10) {
 							path += "_C0" + c;
 						}else {
@@ -984,7 +1014,7 @@ public class LimsChannelSelector_Main implements PlugIn {
 					}	
 				}
 				
-				tmpMsg = "Found " + nrOfPlanes + " channels for file " + subTasksName[subTask] + "!";
+				tmpMsg = "Found " + nrOfChannels + " channels for file " + subTasksName[subTask] + "!";
 				progress.updateBarText(tmpMsg);
 				if(extendedLogging)	progress.notifyMessage("subTasks " + (subTask+1) + ": " + tmpMsg, ProgressDialog.LOG);
 			}
@@ -1096,11 +1126,12 @@ public class LimsChannelSelector_Main implements PlugIn {
 	/**
 	 * TODO
 	 * @param path
-	 * @param channel, to be removed
+	 * @param channel, to be removed (1-based, so channel > 0, channel <= nr of channels.
 	 * @return true if channel was successfully removed from the OME metadata
 	 */
-	private boolean removeChannelFromOMEXML (String path, int channel) {
+	private boolean removeChannelFromOMEXML (String path, int channelToBeRemoved) {
 		String comment = "";
+		String tmpMsg;
 		/**
 		 * Reading the TIFF comment = OME XML Metadata
 		 */
@@ -1124,11 +1155,257 @@ public class LimsChannelSelector_Main implements PlugIn {
 		/**
 		 * Creating an xml document out of it TODO
 		 */
+		DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+		DocumentBuilder db = null;
+		Document omeXMLDoc = null;
+		try {
+			db = dbf.newDocumentBuilder();
+			omeXMLDoc = db.parse(new org.xml.sax.InputSource(new StringReader(comment)));
+			omeXMLDoc.getDocumentElement().normalize();
+			
+		} catch (ParserConfigurationException e) {
+			String out = "";
+			for (int err = 0; err < e.getStackTrace().length; err++) {
+				out += " \n " + e.getStackTrace()[err].toString();
+			}
+			progress.notifyMessage("Could not create XML Document from Tiff comment for " + path + "." 
+					+ "\nError message: " + e.getMessage()
+					+ "\nError localized message: " + e.getLocalizedMessage()
+					+ "\nError cause: " + e.getCause() 
+					+ "\nDetailed message:"
+					+ "\n" + out,
+					ProgressDialog.ERROR);
+		} catch (SAXException e) {
+			String out = "";
+			for (int err = 0; err < e.getStackTrace().length; err++) {
+				out += " \n " + e.getStackTrace()[err].toString();
+			}
+			progress.notifyMessage("Could not create XML Document from Tiff comment for " + path + "." 
+					+ "\nError message: " + e.getMessage()
+					+ "\nError localized message: " + e.getLocalizedMessage()
+					+ "\nError cause: " + e.getCause() 
+					+ "\nDetailed message:"
+					+ "\n" + out,
+					ProgressDialog.ERROR);
+		} catch (IOException e) {
+			String out = "";
+			for (int err = 0; err < e.getStackTrace().length; err++) {
+				out += " \n " + e.getStackTrace()[err].toString();
+			}
+			progress.notifyMessage("Could not create XML Document from Tiff comment for " + path + "." 
+					+ "\nError message: " + e.getMessage()
+					+ "\nError localized message: " + e.getLocalizedMessage()
+					+ "\nError cause: " + e.getCause() 
+					+ "\nDetailed message:"
+					+ "\n" + out,
+					ProgressDialog.ERROR);
+		}
+				
+		/**
+		 * Modifying comment
+		 */
 		
+		//Remove wrong channel and correct channel ids among channels
+		{
+			NodeList channelList = omeXMLDoc.getElementsByTagName("Channel");
+			
+			tmpMsg = "Found " + channelList.getLength() + " channels in OME XML of " + path + "!";
+			progress.updateBarText(tmpMsg);
+			if(extendedLogging)	progress.notifyMessage("" + tmpMsg, ProgressDialog.LOG);
+			
+			String id;
+			int channelNr;
+			for(int c = channelList.getLength()-1; c >= 0; c--) {
+				id = channelList.item(c).getAttributes().getNamedItem("ID").getNodeValue();
+				channelNr = Integer.parseInt(id.substring(id.lastIndexOf(":")+1));
+				if(channelNr == (channelToBeRemoved-1)) {
+
+					tmpMsg = "Deleting channel with id " + id 
+							+ " and name " + channelList.item(c).getAttributes().getNamedItem("Name").getNodeValue() 
+							+ " from OME XML in " + path + "!";
+					progress.updateBarText(tmpMsg);
+					if(extendedLogging)	progress.notifyMessage("" + tmpMsg, ProgressDialog.LOG);
+					
+					channelList.item(c).getParentNode().removeChild(channelList.item(c));
+				}else if(channelNr > (channelToBeRemoved-1)) {
+					id = id.substring(0,id.lastIndexOf(":"));
+					id += "" + (channelNr-1);
+					channelList.item(c).getAttributes().getNamedItem("ID").setNodeValue(id);
+				}
+			}
+		}
 		
-//		/**
-//		 * Modifying comment
-//		 */
+		//Correct channels in TiffData
+		{
+			NodeList tiffDataList = omeXMLDoc.getElementsByTagName("TiffData");
+			
+			tmpMsg = "Found " + tiffDataList.getLength() + " tiff data in OME XML of " + path + "!";
+			progress.updateBarText(tmpMsg);
+			if(extendedLogging)	progress.notifyMessage("" + tmpMsg, ProgressDialog.LOG);
+			
+			int firstC;
+			String tempName;
+			String newCString, oldCString;
+			for(int tD = tiffDataList.getLength()-1; tD >= 0; tD--) {
+				firstC = Integer.parseInt(tiffDataList.item(tD).getAttributes().getNamedItem("FirstC").getNodeValue());
+				if(firstC == (channelToBeRemoved-1)) {
+
+					tmpMsg = "Deleting channel with id " + firstC
+							+ " and name " 
+							+ getFirstNodeWithName(tiffDataList.item(tD).getChildNodes(), "UUID").getAttributes().getNamedItem("FileName").getNodeValue()
+							+ " from OME XML in " + path + "!";
+					progress.updateBarText(tmpMsg);
+					if(extendedLogging)	progress.notifyMessage("" + tmpMsg, ProgressDialog.LOG);
+					
+					tiffDataList.item(tD).getParentNode().removeChild(tiffDataList.item(tD));
+				}else if(firstC > (channelToBeRemoved-1)) {
+					tiffDataList.item(tD).getAttributes().getNamedItem("FirstC").setNodeValue("" + (firstC-1));
+					
+					tempName = getFirstNodeWithName(tiffDataList.item(tD).getChildNodes(), "UUID").getAttributes().getNamedItem("FileName").getNodeValue();
+
+					oldCString = "_C";
+					if((firstC) > 9) {
+						oldCString += "0";
+					}					
+					oldCString += "" + (firstC);
+					
+					newCString = "_C";
+					if((firstC-1) > 9) {
+						newCString += "0";
+					}
+					newCString += "" + (firstC-1);
+					
+					tempName = tempName.replace(oldCString, newCString);
+					
+					if(extendedLogging) {
+						tmpMsg = "Correcting tiffData object with C=" + firstC // TODO hide?
+								+ " and name " 
+								+ getFirstNodeWithName(tiffDataList.item(tD).getChildNodes(), "UUID").getAttributes().getNamedItem("FileName").getNodeValue()
+								+ " to name "
+								+ tempName
+								+ " (in OME XML in " + path + ")!";
+						progress.updateBarText(tmpMsg);
+						progress.notifyMessage("" + tmpMsg, ProgressDialog.LOG);
+					}
+					
+					getFirstNodeWithName(tiffDataList.item(tD).getChildNodes(), "UUID").getAttributes().getNamedItem("FileName").setNodeValue(tempName);
+				}
+			}
+		}
+		
+		//Correct channels in planes
+		{
+			NodeList planeList = omeXMLDoc.getElementsByTagName("Planes");
+			
+			tmpMsg = "Found " + planeList.getLength() + " planes in OME XML of " + path + "!";
+			progress.updateBarText(tmpMsg);
+			if(extendedLogging)	progress.notifyMessage("" + tmpMsg, ProgressDialog.LOG);
+			
+			int theC;
+			for(int tD = planeList.getLength()-1; tD >= 0; tD--) {
+				theC = Integer.parseInt(planeList.item(tD).getAttributes().getNamedItem("TheC").getNodeValue());
+				if(theC == (channelToBeRemoved-1)) {
+
+					tmpMsg = "Deleting plane from channel " + theC + "from OME XML in " + path + "!";
+					if(extendedLogging)	progress.notifyMessageAndDisplayInBar("" + tmpMsg, ProgressDialog.LOG);
+					
+					planeList.item(tD).getParentNode().removeChild(planeList.item(tD));
+				}else if(theC > (channelToBeRemoved-1)) {
+					planeList.item(tD).getAttributes().getNamedItem("TheC").setNodeValue("" + (theC-1));
+				}
+			}
+		}
+		
+		//Correct Size C
+		int NrOfChannels = 0;
+		{
+			if(omeXMLDoc.getElementsByTagName("Pixels").getLength() > 1) {
+				tmpMsg = "WARNING: More than one 'Pixels' node exists in OME XML file. This program might edit the wrong 'Pixels' node, "
+						+ "since it will always edit the first existing node)!";
+				progress.notifyMessage("" + tmpMsg, ProgressDialog.NOTIFICATION);
+			}
+			Node pixelsNode = omeXMLDoc.getElementsByTagName("Pixels").item(0);
+			NrOfChannels = Integer.parseInt(pixelsNode.getAttributes().getNamedItem("SizeC").getNodeValue());
+			pixelsNode.getAttributes().getNamedItem("SizeC").setNodeValue(""+(NrOfChannels-1));
+		}
+		
+		//Add note to description of the image
+		{
+			if(omeXMLDoc.getElementsByTagName("Image").getLength() > 1) {
+				tmpMsg = "WARNING: More than one 'Image' node exists in OME XML file. This program might add the descriotion to the wrong 'Image' node, "
+						+ "since it will always edit the first existing 'Image' node)!";
+				progress.notifyMessage("" + tmpMsg, ProgressDialog.NOTIFICATION);
+			}
+			Node descriptionNode = getFirstNodeWithName(omeXMLDoc.getElementsByTagName("Image").item(0).getChildNodes(), "Description");
+			String description = descriptionNode.getTextContent();
+			description += " Channel " + channelToBeRemoved + " / " + NrOfChannels + " was removed from this image using the ImageJ plugin " + PLUGINNAME + " "
+					+ "(Version " + PLUGINVERSION + ", more information at https://github.com/CellProfiling/HPA_LIMS_Channel_Selector/).";
+			description += " After removing the channel, all other channel IDs, numbers, and names were shifted/corrected to create a " + (NrOfChannels-1) + "-channel image, in detail:";
+			for(int c = 0; c < NrOfChannels; c++) {
+				if((c+1) == channelToBeRemoved) {
+					description += " Channel " + (c+1) + " was removed;";
+				}else if((c+1) > channelToBeRemoved) {
+					description += " Channel " + (c+1) + " was relabeled to be channel " + (c) + ";";
+				}
+			}
+			description += ".";
+			description += "See original metadata annotations for the original image dimensions and information.";
+			
+			descriptionNode.setTextContent(description);			
+		}
+		
+		comment = omeXMLDoc.toString();
+		
+		String outComment = omeXMLDoc.toString();
+		
+		IJ.log(outComment);
+		
+		//Retrieve comment from Document
+//		comment = omeXMLDoc.get
+//		{
+//			 try {
+//				javax.xml.transform.TransformerFactory transformerFactory = TransformerFactory.newInstance();
+//				javax.xml.transform.Transformer transformer;
+//				transformer = transformerFactory.newTransformer();
+//				
+//				DOMSource source = new DOMSource(omeXMLDoc);
+//				StreamResult result = new StreamResult(comment);
+//				
+//				transformer.setOutputProperty(OutputKeys.INDENT, "yes");
+//				transformer.setOutputProperty("{http://xml.apache.org/xslt}indent-amount", "3");
+//				transformer.transform(source, result);
+//					
+//				if(extendedLogging) {
+//					progress.notifyMessage("Metadata XML has been modified...", ProgressDialog.LOG);	
+//				}
+//			 } catch (TransformerConfigurationException e) {
+//					String out = "";
+//					for (int err = 0; err < e.getStackTrace().length; err++) {
+//						out += " \n " + e.getStackTrace()[err].toString();
+//					}
+//					progress.notifyMessage("Could not initialize transformer for XMLs. No easy fix available. Report problem to developer!"
+//							+ "\nError message: " + e.getMessage()
+//							+ "\nError localized message: " + e.getLocalizedMessage()
+//							+ "\nError cause: " + e.getCause() 
+//							+ "\nDetailed message:"
+//							+ "\n" + out,
+//							ProgressDialog.ERROR);	
+//			 } catch (TransformerException e) {
+//				String out = "";
+//				for (int err = 0; err < e.getStackTrace().length; err++) {
+//					out += " \n " + e.getStackTrace()[err].toString();
+//				}
+//				progress.notifyMessage("" 
+//						+ "Error when writing modified xml." 
+//						+ "\nError message: " + e.getMessage()
+//						+ "\nError localized message: " + e.getLocalizedMessage()
+//						+ "\nError cause: " + e.getCause() 
+//						+ "\nDetailed message:"
+//						+ "\n" + out,
+//						ProgressDialog.ERROR);
+//			}
+//		}
+		
 //		progress.updateBarText("Generate metadata store from tiff comment for image " + omeTifFileName);
 //		ServiceFactory factory = new ServiceFactory();
 //		OMEXMLService service = factory.getInstance(OMEXMLService.class);
@@ -1151,35 +1428,35 @@ public class LimsChannelSelector_Main implements PlugIn {
 		/**
 		 * Saving the modified comment
 		 */
-		try {
-			replaceTiffCommentInFile(path, comment);
-		} catch (IOException e) {
-			String out = "";
-			for (int err = 0; err < e.getStackTrace().length; err++) {
-				out += " \n " + e.getStackTrace()[err].toString();
-			}
-			progress.notifyMessage("IO-ERROR when trying to replace the tiff comment in " + path + "." 
-					+ "\nError message: " + e.getMessage()
-					+ "\nError localized message: " + e.getLocalizedMessage()
-					+ "\nError cause: " + e.getCause() 
-					+ "\nDetailed message:"
-					+ "\n" + out,
-					ProgressDialog.ERROR);
-			return false;
-		} catch (FormatException e) {
-			String out = "";
-			for (int err = 0; err < e.getStackTrace().length; err++) {
-				out += " \n " + e.getStackTrace()[err].toString();
-			}
-			progress.notifyMessage("FORMAT-ERROR when trying to replace the tiff comment in" + path + "." 
-					+ "\nError message: " + e.getMessage()
-					+ "\nError localized message: " + e.getLocalizedMessage()
-					+ "\nError cause: " + e.getCause() 
-					+ "\nDetailed message:"
-					+ "\n" + out,
-					ProgressDialog.ERROR);
-			return false;
-		}
+//		try {
+//			replaceTiffCommentInFile(path, comment); TODO
+//		} catch (IOException e) {
+//			String out = "";
+//			for (int err = 0; err < e.getStackTrace().length; err++) {
+//				out += " \n " + e.getStackTrace()[err].toString();
+//			}
+//			progress.notifyMessage("IO-ERROR when trying to replace the tiff comment in " + path + "." 
+//					+ "\nError message: " + e.getMessage()
+//					+ "\nError localized message: " + e.getLocalizedMessage()
+//					+ "\nError cause: " + e.getCause() 
+//					+ "\nDetailed message:"
+//					+ "\n" + out,
+//					ProgressDialog.ERROR);
+//			return false;
+//		} catch (FormatException e) {
+//			String out = "";
+//			for (int err = 0; err < e.getStackTrace().length; err++) {
+//				out += " \n " + e.getStackTrace()[err].toString();
+//			}
+//			progress.notifyMessage("FORMAT-ERROR when trying to replace the tiff comment in" + path + "." 
+//					+ "\nError message: " + e.getMessage()
+//					+ "\nError localized message: " + e.getLocalizedMessage()
+//					+ "\nError cause: " + e.getCause() 
+//					+ "\nDetailed message:"
+//					+ "\n" + out,
+//					ProgressDialog.ERROR);
+//			return false;
+//		}
 		
 		return true;
 	}
@@ -1214,5 +1491,20 @@ public class LimsChannelSelector_Main implements PlugIn {
 		progress.updateBarText("Saving " + path + " done!");
 		if(extendedLogging)	progress.notifyMessage("Saved " + path, ProgressDialog.LOG);
 		
+	}
+	
+	/**
+	 * Find the first node with a specific name in a NodeList
+	 * @param A NodeList in which a Node shall be found
+	 * @param The name of the Node that shall be found as a String
+	 * @return First node in the list called 'nodes' that has the given name
+	 */
+	private static Node getFirstNodeWithName(NodeList nodes, String name) {
+		for(int n = 0; n < nodes.getLength(); n++) {
+			if(nodes.item(n).getNodeName().equals(name)) {
+				return nodes.item(n);
+			}
+		}
+		return null;
 	}
 }// end main class

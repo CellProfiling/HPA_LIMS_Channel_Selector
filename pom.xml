@@ -11,7 +11,7 @@
  
  	<artifactId>HPA_LIMS_CHANNEL_SELECTOR_JNH</artifactId>
  	<groupId>CellProfiling</groupId>
-    <version>0.1.1-SNAPSHOT</version>
+    <version>0.0.1-SNAPSHOT</version>
  
 <!-- Plugin Information -->
     <name>HPA_LIMS_CHANNEL_SELECTOR_JNH</name>
