@@ -8,7 +8,7 @@ package limsChannelSelector_jnh;
 
 import java.awt.Component;
 import java.awt.Dimension;
-import java.awt.FileDialog;
+//import java.awt.FileDialog;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.io.File;
@@ -38,7 +38,7 @@ public class OpenFilesDialog extends javax.swing.JFrame implements ActionListene
 	JSeparator jSeparator2;
 	JPanel bgPanel;
 	JScrollPane jScrollPane1;
-	JList Liste1;
+	JList <String> Liste1 ;
 	JButton loadSingleFilesButton, loadByPatternButtom, removeFileButton, goButton;
 
 	public OpenFilesDialog() {
@@ -70,9 +70,9 @@ public class OpenFilesDialog extends javax.swing.JFrame implements ActionListene
 			jScrollPane1.setPreferredSize(new java.awt.Dimension(prefXSize - 10, prefYSize - 60));
 			bgPanel.add(jScrollPane1);
 			{
-				Liste1 = new JList();
+				Liste1 = new javax.swing.JList <String> ();
 				jScrollPane1.setViewportView(Liste1);
-				Liste1.setModel(new DefaultComboBoxModel(new String[] { "" }));
+				Liste1.setModel(new DefaultComboBoxModel <String>(new String[] { "" }));
 			}
 			{
 				JPanel spacer = new JPanel();
@@ -131,7 +131,7 @@ public class OpenFilesDialog extends javax.swing.JFrame implements ActionListene
 	public void actionPerformed(ActionEvent ae) {
 		Object eventQuelle = ae.getSource();
 		if (eventQuelle == loadSingleFilesButton) {
-			String OS = System.getProperty("os.name").toUpperCase();			
+//			String OS = System.getProperty("os.name").toUpperCase();			
 //			if(OS.contains("MAC")) {
 //				java.awt.FileDialog fd = new java.awt.FileDialog(this, "Select files to add to list.");
 //				fd.setDirectory(System.getProperty("user.dir", "."));
@@ -265,7 +265,7 @@ public class OpenFilesDialog extends javax.swing.JFrame implements ActionListene
 		return s;
 	}
 
-	@SuppressWarnings("unchecked")
+//	@SuppressWarnings("unchecked")
 	public void updateDisplay() {
 		String resultsString[] = new String[filesToOpen.size()];
 		for (int i = 0; i < filesToOpen.size(); i++) {
