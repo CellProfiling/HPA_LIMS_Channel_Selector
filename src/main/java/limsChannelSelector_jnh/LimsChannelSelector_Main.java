@@ -26,6 +26,7 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.StringReader;
+import java.io.StringWriter;
 import java.text.DecimalFormat;
 import java.text.DecimalFormatSymbols;
 import java.text.SimpleDateFormat;
@@ -991,7 +992,7 @@ public class LimsChannelSelector_Main implements PlugIn {
 							}
 						}
 						
-						path += System.getProperty("file.separator") + subTasksPath [subTask];
+						path += System.getProperty("file.separator") + subTasksName [subTask];
 						
 						if(p < 10) {
 							path += "_Z0" + p;
@@ -1007,7 +1008,7 @@ public class LimsChannelSelector_Main implements PlugIn {
 						path += ".ome.tif";
 						
 						if(!new File(path).exists()) {
-							tmpMsg = "ERROR: Channel " + (c+1) + " was missing in " + subTasksPath[subTask] + "!";
+							tmpMsg = "ERROR: Channel " + (c+1) + " was missing in " + subTasksPath[subTask] + ", could not find " + path + "!";
 							progress.notifyMessage("subTasks " + (subTask+1) + ": " + tmpMsg, ProgressDialog.ERROR);
 							continue tasking;
 						}
@@ -1036,6 +1037,17 @@ public class LimsChannelSelector_Main implements PlugIn {
 						
 						//Determine input file path
 						path = subTasksPath [subTask];
+						
+						if(!new File(path).exists()) {
+							if(p < 10) {
+								path += "_Z0" + p;
+							}else {
+								path += "_Z" + p;							
+							}
+						}
+						
+						path += System.getProperty("file.separator") + subTasksName [subTask];
+						
 						if(p < 10) {
 							path += "_Z0" + p;
 						}else {
@@ -1050,11 +1062,13 @@ public class LimsChannelSelector_Main implements PlugIn {
 						
 						//Determine output file path
 						outFilePath = subTasksPath [subTask].substring(0,subTasksPath [subTask].lastIndexOf(subTasksName [subTask])-1);
-						outFilePath = subTasksPath [subTask].substring(0,subTasksPath [subTask].lastIndexOf(subTasksName [subTask])-1);
-						outFilePath = outFilePath.substring(outFilePath.lastIndexOf(System.getProperty("file.path")));
-						outFilePath = outFolder + (System.getProperty("file.path")) + outFilePath + (System.getProperty("file.path"));
+						IJ.log(outFilePath);
+						outFilePath = outFilePath.substring(outFilePath.lastIndexOf(System.getProperty("file.separator"))+1);
+						IJ.log(outFilePath);
+						outFilePath = outFolder + (System.getProperty("file.separator")) + outFilePath + (System.getProperty("file.separator"));
+						IJ.log(outFilePath);
 						
-						outFilePath += subTasksName [subTask] + (System.getProperty("file.path"));
+						outFilePath += subTasksName [subTask] + (System.getProperty("file.separator"));
 						if(nrOfPlanes > 1) {
 							if(p < 10) {
 								outFilePath += "_Z0" + p;
@@ -1295,7 +1309,7 @@ public class LimsChannelSelector_Main implements PlugIn {
 		
 		//Correct channels in planes
 		{
-			NodeList planeList = omeXMLDoc.getElementsByTagName("Planes");
+			NodeList planeList = omeXMLDoc.getElementsByTagName("Plane");
 			
 			tmpMsg = "Found " + planeList.getLength() + " planes in OME XML of " + path + "!";
 			progress.updateBarText(tmpMsg);
@@ -1327,6 +1341,9 @@ public class LimsChannelSelector_Main implements PlugIn {
 			Node pixelsNode = omeXMLDoc.getElementsByTagName("Pixels").item(0);
 			NrOfChannels = Integer.parseInt(pixelsNode.getAttributes().getNamedItem("SizeC").getNodeValue());
 			pixelsNode.getAttributes().getNamedItem("SizeC").setNodeValue(""+(NrOfChannels-1));
+			
+			tmpMsg = "Adjusted SizeC to " + pixelsNode.getAttributes().getNamedItem("SizeC").getNodeValue() + "in OME XML of " + path + "!";
+			if(extendedLogging)	progress.notifyMessageAndDisplayInBar("" + tmpMsg, ProgressDialog.LOG);
 		}
 		
 		//Add note to description of the image
@@ -1351,60 +1368,64 @@ public class LimsChannelSelector_Main implements PlugIn {
 			description += ".";
 			description += "See original metadata annotations for the original image dimensions and information.";
 			
-			descriptionNode.setTextContent(description);			
+			descriptionNode.setTextContent(description);		
+			
+			tmpMsg = "Adjusted SizeC to " + descriptionNode.getTextContent() + "in OME XML of " + path + "!";
+			if(extendedLogging)	progress.notifyMessageAndDisplayInBar("" + tmpMsg, ProgressDialog.LOG);
 		}
 		
-		comment = omeXMLDoc.toString();
+//		comment = omeXMLDoc.toString();
 		
-		String outComment = omeXMLDoc.toString();
+		String outComment = "";
 		
-		IJ.log(outComment);
+//		IJ.log(outComment);
 		
 		//Retrieve comment from Document
 //		comment = omeXMLDoc.get
-//		{
-//			 try {
-//				javax.xml.transform.TransformerFactory transformerFactory = TransformerFactory.newInstance();
-//				javax.xml.transform.Transformer transformer;
-//				transformer = transformerFactory.newTransformer();
-//				
-//				DOMSource source = new DOMSource(omeXMLDoc);
-//				StreamResult result = new StreamResult(comment);
-//				
-//				transformer.setOutputProperty(OutputKeys.INDENT, "yes");
-//				transformer.setOutputProperty("{http://xml.apache.org/xslt}indent-amount", "3");
-//				transformer.transform(source, result);
-//					
-//				if(extendedLogging) {
-//					progress.notifyMessage("Metadata XML has been modified...", ProgressDialog.LOG);	
-//				}
-//			 } catch (TransformerConfigurationException e) {
-//					String out = "";
-//					for (int err = 0; err < e.getStackTrace().length; err++) {
-//						out += " \n " + e.getStackTrace()[err].toString();
-//					}
-//					progress.notifyMessage("Could not initialize transformer for XMLs. No easy fix available. Report problem to developer!"
-//							+ "\nError message: " + e.getMessage()
-//							+ "\nError localized message: " + e.getLocalizedMessage()
-//							+ "\nError cause: " + e.getCause() 
-//							+ "\nDetailed message:"
-//							+ "\n" + out,
-//							ProgressDialog.ERROR);	
-//			 } catch (TransformerException e) {
-//				String out = "";
-//				for (int err = 0; err < e.getStackTrace().length; err++) {
-//					out += " \n " + e.getStackTrace()[err].toString();
-//				}
-//				progress.notifyMessage("" 
-//						+ "Error when writing modified xml." 
-//						+ "\nError message: " + e.getMessage()
-//						+ "\nError localized message: " + e.getLocalizedMessage()
-//						+ "\nError cause: " + e.getCause() 
-//						+ "\nDetailed message:"
-//						+ "\n" + out,
-//						ProgressDialog.ERROR);
-//			}
-//		}
+		//TODO Test
+		{
+			try {
+				javax.xml.transform.TransformerFactory transformerFactory = TransformerFactory.newInstance();
+				javax.xml.transform.Transformer transformer;
+				transformer = transformerFactory.newTransformer();
+				transformer.setOutputProperty(OutputKeys.INDENT, "yes");
+				transformer.setOutputProperty("{http://xml.apache.org/xslt}indent-amount", "3");
+				
+				StringWriter stringWriter = new StringWriter();
+				transformer.transform(new DOMSource(omeXMLDoc), new StreamResult(stringWriter));
+				outComment = stringWriter.toString();
+				if(extendedLogging) {
+					progress.notifyMessage("Metadata XML has been modified...", ProgressDialog.LOG);	
+				}
+			} catch (TransformerConfigurationException e) {
+				String out = "";
+				for (int err = 0; err < e.getStackTrace().length; err++) {
+					out += " \n " + e.getStackTrace()[err].toString();
+				}
+				progress.notifyMessage("Could not initialize transformer for XMLs. No easy fix available. Report problem to developer!"
+						+ "\nError message: " + e.getMessage()
+						+ "\nError localized message: " + e.getLocalizedMessage()
+						+ "\nError cause: " + e.getCause() 
+						+ "\nDetailed message:"
+						+ "\n" + out,
+						ProgressDialog.ERROR);	
+			} catch (TransformerException e) {
+				String out = "";
+				for (int err = 0; err < e.getStackTrace().length; err++) {
+					out += " \n " + e.getStackTrace()[err].toString();
+				}
+				progress.notifyMessage("" 
+						+ "Error when writing modified xml." 
+						+ "\nError message: " + e.getMessage()
+						+ "\nError localized message: " + e.getLocalizedMessage()
+						+ "\nError cause: " + e.getCause() 
+						+ "\nDetailed message:"
+						+ "\n" + out,
+						ProgressDialog.ERROR);
+			}
+		}
+		
+		IJ.log(outComment);
 		
 //		progress.updateBarText("Generate metadata store from tiff comment for image " + omeTifFileName);
 //		ServiceFactory factory = new ServiceFactory();
