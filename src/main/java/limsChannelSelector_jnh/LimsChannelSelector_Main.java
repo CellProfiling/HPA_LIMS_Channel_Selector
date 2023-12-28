@@ -103,9 +103,9 @@ public class LimsChannelSelector_Main implements PlugIn {
 
 	// -----------------define params for Dialog-----------------
 	int tasks = 1;
-	boolean extendedLogging = true;
-	boolean logInitialFileScreening = true;
-	boolean logWholeOMEXMLComments = true;
+	boolean extendedLogging = false;
+	boolean logInitialFileScreening = false;
+	boolean logWholeOMEXMLComments = false;
 	boolean logIfAChannelWasOversat = true;
 	
 	
@@ -328,14 +328,14 @@ public class LimsChannelSelector_Main implements PlugIn {
 				if (withMetaData == false) {
 					if(extendedLogging || logInitialFileScreening || logWholeOMEXMLComments) {
 						IJ.log(od.filesToOpen.get(task).getName() + " was skipped since missing MetaData folder");
-						continue scanning;
 					}
+					continue scanning;
 				}
 				if (omeTifFilesPresent == false) {
 					if(extendedLogging || logInitialFileScreening || logWholeOMEXMLComments) {
 						IJ.log(od.filesToOpen.get(task).getName() + " was skipped since no tif files present");
-						continue scanning;
 					}
+					continue scanning;
 				}
 				if (invalidFiles) {					
 						IJ.log("WARNING: " + od.filesToOpen.get(task).getName() + " contained files not matching file name requirements.");
@@ -461,7 +461,7 @@ public class LimsChannelSelector_Main implements PlugIn {
 				overSatA = new boolean [subTasks];
 				overSatB = new boolean [subTasks];
 				chooseA = new boolean [subTasks];
-				int chosenImagesA = 0;
+				int chosenImagesA = 0, overSatCtA, overSatCtB;
 				
 				for (int subTask = 0; subTask < subTasks; subTask++) {
 					// Check how many planes there are by checking how many folders with the name are in the folder
@@ -480,12 +480,26 @@ public class LimsChannelSelector_Main implements PlugIn {
 
 						tmpMsg = "Found " + nrOfPlanes + " planes for file " + subTasksName[subTask] + " (subTask " + subTask + " / " + subTasks + ")!";
 						progress.updateBarText(tmpMsg);
-						if(extendedLogging)	progress.notifyMessage("subTasks " + (subTask+1) + ": " + tmpMsg, ProgressDialog.LOG);
+						if(extendedLogging) {
+							progress.notifyMessage("subTasks " + (subTask+1) + " in task " + (task+1) + ": " + tmpMsg, ProgressDialog.LOG);
+						}
 					}
 									
 					// Open the channels to be analysed
 					ImagePlus impChannelA = openChannel(subTasksPath [subTask], subTasksName[subTask], nrOfPlanes, (channelA-1), subTask);
 					ImagePlus impChannelB = openChannel(subTasksPath [subTask], subTasksName[subTask], nrOfPlanes, (channelB-1), subTask);
+					
+					if(impChannelA == null) {
+						tmpMsg = "Could not open channel A images for " + subTasksName[subTask] + ". Need to skip task " + task + "!";
+						progress.notifyMessageAndDisplayInBar("subTask " + (subTask+1) + " in task " + (task+1) + ": " + tmpMsg, ProgressDialog.ERROR);
+						break running;
+					}
+					
+					if(impChannelB == null) {
+						tmpMsg = "Could not open channel B images for " + subTasksName[subTask] + ". Need to skip task " + task + "!";
+						progress.notifyMessageAndDisplayInBar("subTask " + (subTask+1) + " in task " + (task+1) + ": " + tmpMsg, ProgressDialog.ERROR);
+						break running;
+					}
 					
 //					impChannelA.show();
 //					new WaitForUserDialog("Check A").show();
@@ -549,15 +563,25 @@ public class LimsChannelSelector_Main implements PlugIn {
 							+ " Value A: " + valueA + "."
 							+ " Value B: " + valueB + ".";
 					progress.updateBarText(tmpMsg);
-					if(extendedLogging || logIfAChannelWasOversat) {
-						progress.notifyMessage("subTasks " + (subTask+1) + ": " + tmpMsg, ProgressDialog.LOG);
+					if(extendedLogging || (logIfAChannelWasOversat && (overSatA [subTask] || overSatB [subTask]))) {
+						progress.notifyMessageAndDisplayInBar("subTasks " + (subTask+1) + " in task " + (task+1) + ": " + tmpMsg, ProgressDialog.LOG);
 					}
+
+					progress.addToBar(0.9/subTasks/2.0);
 				}
 				
 				chosenImagesA = 0;
+				overSatCtA = 0;
+				overSatCtB = 0;
 				for (int subTask = 0; subTask < subTasks; subTask++) {
 					if(chooseA [subTask]) {
 						chosenImagesA++;
+					}
+					if(overSatA [subTask]) {
+						overSatCtA++;
+					}
+					if(overSatB [subTask]) {
+						overSatCtB++;
 					}
 				}
 				
@@ -565,17 +589,23 @@ public class LimsChannelSelector_Main implements PlugIn {
 				 * Check which channel is preferred for 50% of the images
 				 */
 				if(chosenImagesA >= subTasks/2.0) {
-					tmpMsg += "Channel A (ID " + channelA + ") was selected because "
-							+ chosenImagesA + " of " + subTasks + " images were better in this channel.";
-					progress.updateBarText(tmpMsg);
-					if(extendedLogging)	progress.notifyMessage("Task " + (task+1) + ": " + tmpMsg, ProgressDialog.LOG);
+					tmpMsg = "Channel A (ID " + channelA + ") was selected because "
+							+ chosenImagesA + " of " + subTasks + " images were better in this channel (Found "
+									+ overSatCtA + " oversaturated images in A and "
+									+ overSatCtB + " oversaturated images in B).";
+					if(extendedLogging || (logIfAChannelWasOversat && (overSatCtA > 0 || overSatCtB > 0))) {
+						progress.notifyMessageAndDisplayInBar("Task " + (task+1) + ": " + tmpMsg, ProgressDialog.LOG);
+					}
 					
 					moveAndRemoveChannel(subTasksPath, subTasksName, outPath, channelB);
 				}else {
-					tmpMsg += "Channel B (ID " + channelA + ") was selected because "
-							+ (subTasks-chosenImagesA) + " of " + subTasks + " images were better in this channel.";
-					progress.updateBarText(tmpMsg);
-					if(extendedLogging)	progress.notifyMessage("Task " + (task+1) + ": " + tmpMsg, ProgressDialog.LOG);
+					tmpMsg = "Channel B (ID " + channelB + ") was selected because "
+							+ (subTasks-chosenImagesA) + " of " + subTasks + " images were better in this channel (Found "
+									+ overSatCtA + " oversaturated images in A and "
+									+ overSatCtB + " oversaturated images in B).";
+					if(extendedLogging || (logIfAChannelWasOversat && (overSatCtA > 0 || overSatCtB > 0))) {
+						progress.notifyMessageAndDisplayInBar("Task " + (task+1) + ": " + tmpMsg, ProgressDialog.LOG);
+					}
 
 					moveAndRemoveChannel(subTasksPath, subTasksName, outPath, channelA);				
 				}
@@ -583,11 +613,12 @@ public class LimsChannelSelector_Main implements PlugIn {
 				/**
 				 * Finish
 				 */
-				processingDone = true;
-				progress.updateBarText("processing finished!");
-				progress.setBar(0.9);
 				break running;
 			}
+			processingDone = true;
+			progress.updateBarText("processing finished!");
+			progress.setBar(1.0);
+			
 			progress.moveTask(task);
 			System.gc();	
 		}
@@ -614,7 +645,9 @@ public class LimsChannelSelector_Main implements PlugIn {
 			
 			String tmpMsg = "Opening " + name + " (" +  tempString + ")...";
 			progress.updateBarText(tmpMsg);
-			if(extendedLogging)	progress.notifyMessage("subTask " + (subTask+1) + ": " + tmpMsg, ProgressDialog.LOG);
+			if(extendedLogging) {
+				progress.notifyMessage("subTask " + (subTask+1) + ": " + tmpMsg, ProgressDialog.LOG);
+			}
 			
 			imp = IJ.openImage(tempString);
 		}else {
@@ -634,7 +667,9 @@ public class LimsChannelSelector_Main implements PlugIn {
 				
 				String tmpMsg = "Opening " + name + "_Z" + planeString + "_C" + channelString + ".ome.tif" + " (" +  tempString + ")...";
 				progress.updateBarText(tmpMsg);
-				if(extendedLogging)	progress.notifyMessage("subTask " + (subTask+1) + ": " + tmpMsg, ProgressDialog.LOG);
+				if(extendedLogging) {
+					progress.notifyMessage("subTask " + (subTask+1) + ": " + tmpMsg, ProgressDialog.LOG);
+				}
 				
 				imp = IJ.openImage(tempString);
 				
@@ -718,7 +753,9 @@ public class LimsChannelSelector_Main implements PlugIn {
 		
 		tmpMsg = ("Now exploring " + dir.getAbsolutePath().substring(dir.getAbsolutePath().lastIndexOf(System.getProperty("file.separator"))) + " to find matching files...");
 		progress.updateBarText(tmpMsg);
-		if(extendedLogging)	progress.notifyMessage(tmpMsg, ProgressDialog.LOG);
+		if(extendedLogging) {
+			progress.notifyMessage(tmpMsg, ProgressDialog.LOG);
+		}
 		
 		// Explore the directory and find images to be converted
 		int subTasks = taskFiles.size();
@@ -762,7 +799,9 @@ public class LimsChannelSelector_Main implements PlugIn {
 						tmpMsg = (taskFiles.get(task).getAbsolutePath() + System.getProperty("file.separator") 
 							+ fileList[f] + " was skipped since metadata xml file was lacking!");
 						progress.updateBarText(tmpMsg);
-						if(extendedLogging)	progress.notifyMessage(tmpMsg, ProgressDialog.LOG);
+						if(extendedLogging) {
+							progress.notifyMessage(tmpMsg, ProgressDialog.LOG);
+						}
 					}
 				}else if (fileList[f].endsWith(".ome.tif")) {
 					if (fileList[f].contains("_Z")) {
@@ -773,7 +812,7 @@ public class LimsChannelSelector_Main implements PlugIn {
 									+ fileList[f]
 									+ " did not contain _Z and thus it will be skipped!");
 							progress.updateBarText(tmpMsg);
-							if(extendedLogging)	progress.notifyMessage(tmpMsg, ProgressDialog.LOG);
+							progress.notifyMessage(tmpMsg, ProgressDialog.LOG);
 						}
 						invalidFiles = true;
 						continue;
@@ -784,7 +823,7 @@ public class LimsChannelSelector_Main implements PlugIn {
 								+ fileList[f]
 								+ " is neither a metadata folder nor an .ome.tif file and thus it will be skipped!");
 						progress.updateBarText(tmpMsg);
-						if(extendedLogging)	progress.notifyMessage(tmpMsg, ProgressDialog.LOG);
+						progress.notifyMessage(tmpMsg, ProgressDialog.LOG);
 					}
 					invalidFiles = true;						
 					continue;
@@ -795,22 +834,22 @@ public class LimsChannelSelector_Main implements PlugIn {
 				if(extendedLogging || logInitialFileScreening || logWholeOMEXMLComments) {
 					tmpMsg = (taskFiles.get(task).getName() + " was skipped since missing MetaData folder");
 					progress.updateBarText(tmpMsg);
-					if(extendedLogging)	progress.notifyMessage(tmpMsg, ProgressDialog.LOG);
-					continue scanning;
+					progress.notifyMessage(tmpMsg, ProgressDialog.LOG);
 				}
+				continue scanning;
 			}
 			if (omeTifFilesPresent == false) {
 				if(extendedLogging || logInitialFileScreening || logWholeOMEXMLComments) {
 					tmpMsg = (taskFiles.get(task).getName() + " was skipped since no tif files present");
-					progress.updateBarText(tmpMsg);
-					if(extendedLogging)	progress.notifyMessage(tmpMsg, ProgressDialog.LOG);
-					continue scanning;
+					progress.updateBarText(tmpMsg);					
+					progress.notifyMessage(tmpMsg, ProgressDialog.LOG);
 				}
+				continue scanning;
 			}
 			if (invalidFiles) {					
 					tmpMsg = ("WARNING: " + taskFiles.get(task).getName() + " contained files not matching file name requirements.");
 					progress.updateBarText(tmpMsg);
-					if(extendedLogging)	progress.notifyMessage(tmpMsg, ProgressDialog.LOG);
+					progress.notifyMessage(tmpMsg, ProgressDialog.LOG);
 			}
 
 			/**
@@ -835,7 +874,7 @@ public class LimsChannelSelector_Main implements PlugIn {
 			if(extendedLogging || logInitialFileScreening || logWholeOMEXMLComments) {
 				tmpMsg = ("ACCEPTED: " + tempFile);
 				progress.updateBarText(tmpMsg);
-				if(extendedLogging)	progress.notifyMessage(tmpMsg, ProgressDialog.LOG);
+				progress.notifyMessage(tmpMsg, ProgressDialog.LOG);
 			}
 		}
 		
@@ -848,7 +887,7 @@ public class LimsChannelSelector_Main implements PlugIn {
 			if(extendedLogging || logInitialFileScreening || logWholeOMEXMLComments) {
 				tmpMsg = ("FULL PATH to be submitted: " + fullPaths[task]);
 				progress.updateBarText(tmpMsg);
-				if(extendedLogging)	progress.notifyMessage(tmpMsg, ProgressDialog.LOG);
+				progress.notifyMessage(tmpMsg, ProgressDialog.LOG);
 			}
 		}
 		allFiles.clear();
@@ -857,7 +896,7 @@ public class LimsChannelSelector_Main implements PlugIn {
 		if (subTasks == 0) {
 			tmpMsg = ("No acceptable folders found in " + dir + "!");
 			progress.updateBarText(tmpMsg);
-			if(extendedLogging)	progress.notifyMessage(tmpMsg, ProgressDialog.NOTIFICATION);
+			progress.notifyMessage(tmpMsg, ProgressDialog.NOTIFICATION);
 		}
 		return fullPaths;		
 	}
@@ -1205,7 +1244,7 @@ public class LimsChannelSelector_Main implements PlugIn {
 				}
 			}
 			
-			
+			progress.addToBar(0.9/subTasks/2.0);
 		}
 		
 	}
@@ -1314,7 +1353,7 @@ public class LimsChannelSelector_Main implements PlugIn {
 					
 					channelList.item(c).getParentNode().removeChild(channelList.item(c));
 				}else if(channelNr > (channelToBeRemoved-1)) {
-					id = id.substring(0,id.lastIndexOf(":"));
+					id = id.substring(0,id.lastIndexOf(":")+1);
 					id += "" + (channelNr-1);
 					channelList.item(c).getAttributes().getNamedItem("ID").setNodeValue(id);
 				}
@@ -1350,13 +1389,13 @@ public class LimsChannelSelector_Main implements PlugIn {
 					tempName = getFirstNodeWithName(tiffDataList.item(tD).getChildNodes(), "UUID").getAttributes().getNamedItem("FileName").getNodeValue();
 
 					oldCString = "_C";
-					if((firstC) > 9) {
+					if((firstC) < 10) {
 						oldCString += "0";
 					}					
 					oldCString += "" + (firstC);
 					
 					newCString = "_C";
-					if((firstC-1) > 9) {
+					if((firstC-1) < 10) {
 						newCString += "0";
 					}
 					newCString += "" + (firstC-1);
