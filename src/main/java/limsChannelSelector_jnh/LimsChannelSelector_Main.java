@@ -423,7 +423,7 @@ public class LimsChannelSelector_Main implements PlugIn {
 		// -----------------------------PROCESS TASKS----------------------------------
 		// &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
 				
-		String tmpMsg = "";
+		String tmpMsg = "", addToDescription = "", valuesListA, valuesListB;
 		int subTasks = 1;
 		String subTasksPath [] = new String [0];
 		String subTasksName [] = new String [0];
@@ -462,6 +462,9 @@ public class LimsChannelSelector_Main implements PlugIn {
 				overSatB = new boolean [subTasks];
 				chooseA = new boolean [subTasks];
 				int chosenImagesA = 0, overSatCtA, overSatCtB;
+				addToDescription = "";
+				valuesListA = "";
+				valuesListB = "";
 				
 				for (int subTask = 0; subTask < subTasks; subTask++) {
 					// Check how many planes there are by checking how many folders with the name are in the folder
@@ -520,6 +523,9 @@ public class LimsChannelSelector_Main implements PlugIn {
 					// Get median values from the different image regions and check for oversaturation
 					double valueA = getMedian(valuesA);					
 					double valueB = getMedian(valuesB);
+					
+					valuesListA += valueA + ",";
+					valuesListB += valueB + ",";
 					
 					if(valueA >= Math.pow(2.0, impChannelA.getBitDepth())-1) {
 						overSatA [subTask] = true;
@@ -586,6 +592,23 @@ public class LimsChannelSelector_Main implements PlugIn {
 				}
 				
 				/**
+				 * Prepare String to write into OME XML description
+				 */
+				addToDescription = "Detailed overview about values fetched from all images in well:\n"
+						+ "Channel " + (channelA) + " - upper limit values: " + valuesListA.substring(0,valuesListA.length()-1) + ";\n"
+						+ "Channel " + (channelB) + " - upper limit values: " + valuesListB.substring(0,valuesListB.length()-1) + ";\n"
+						+ "Chose A?: ";
+				for (int subTask = 0; subTask < subTasks; subTask++) {
+					if(chooseA[subTask]) {
+						addToDescription += "T,";
+					}else {
+						addToDescription += "F,";
+						
+					}
+				}
+				addToDescription = addToDescription.substring(0,addToDescription.length()-1) + ".";
+				
+				/**
 				 * Check which channel is preferred for 50% of the images
 				 */
 				if(chosenImagesA >= subTasks/2.0) {
@@ -596,8 +619,12 @@ public class LimsChannelSelector_Main implements PlugIn {
 					if(extendedLogging || (logIfAChannelWasOversat && (overSatCtA > 0 || overSatCtB > 0))) {
 						progress.notifyMessageAndDisplayInBar("Task " + (task+1) + ": " + tmpMsg, ProgressDialog.LOG);
 					}
-					
-					moveAndRemoveChannel(subTasksPath, subTasksName, outPath, channelB);
+
+					addToDescription = "Channel " + (channelA) + " was selected when compared to channel " + (channelB) + " because "
+							+ chosenImagesA + " of " + subTasks + " images were better in this channel (Found "
+							+ overSatCtA + " oversaturated images in channel " + (channelA) + " and "
+							+ overSatCtB + " oversaturated images in channel " + (channelB) + ").\n" + addToDescription;
+					moveAndRemoveChannel(subTasksPath, subTasksName, outPath, channelB, addToDescription);
 				}else {
 					tmpMsg = "Channel B (ID " + channelB + ") was selected because "
 							+ (subTasks-chosenImagesA) + " of " + subTasks + " images were better in this channel (Found "
@@ -607,7 +634,11 @@ public class LimsChannelSelector_Main implements PlugIn {
 						progress.notifyMessageAndDisplayInBar("Task " + (task+1) + ": " + tmpMsg, ProgressDialog.LOG);
 					}
 
-					moveAndRemoveChannel(subTasksPath, subTasksName, outPath, channelA);				
+					addToDescription = "Channel " + (channelB) + " was selected when compared to channel " + (channelA) + " because "
+							+ (subTasks-chosenImagesA) + " of " + subTasks + " images were better in this channel (Found "
+							+ overSatCtA + " oversaturated images in channel " + (channelA) + " and "
+							+ overSatCtB + " oversaturated images in channel " + (channelB) + ").\n" + addToDescription;
+					moveAndRemoveChannel(subTasksPath, subTasksName, outPath, channelA, addToDescription);				
 				}
 				
 				/**
@@ -981,9 +1012,22 @@ public class LimsChannelSelector_Main implements PlugIn {
 	}
 	
 	/**
-	 * @param channelIDToRemove: 1-based
+	 * Copies the images into a new file system defined by @param outFolder.
+	 * @param subTasksPath and subTasksName define the paths to the images to be copied and the names of the last directory in each path, respectively.
+	 * @param channelIDToRemove: 1-based.
+	 * @param addToDescription: allows to give a String that shall be added to the end of the description xml node in the OME XML metadata.
 	 */
 	private void moveAndRemoveChannel(String [] subTasksPath, String [] subTasksName, String outFolder, int channelIDToRemove) {
+		moveAndRemoveChannel(subTasksPath, subTasksName, outFolder, channelIDToRemove, "");
+	}
+	
+	/**
+	 * Copies the images into a new file system defined by @param outFolder.
+	 * @param subTasksPath and subTasksName define the paths to the images to be copied and the names of the last directory in each path, respectively.
+	 * @param channelIDToRemove: 1-based.
+	 * @param addToDescription: allows to give a String that shall be added to the end of the description xml node in the OME XML metadata.
+	 */
+	private void moveAndRemoveChannel(String [] subTasksPath, String [] subTasksName, String outFolder, int channelIDToRemove, String addToDescription) {
 		int subTasks = subTasksPath.length;
 		String tmpMsg;
 		
@@ -1172,7 +1216,7 @@ public class LimsChannelSelector_Main implements PlugIn {
 						
 						// Correct tif comment
 						{
-							if(!removeChannelFromOMEXML(destFile.getAbsolutePath(), channelIDToRemove)) {
+							if(!removeChannelFromOMEXML(destFile.getAbsolutePath(), channelIDToRemove, addToDescription)) {
 								progress.notifyMessage("ERROR: Failed to correct OME-XML file in " + destFile.getAbsolutePath() +  ". Consequently, file has incorrect OME metadata!",
 										ProgressDialog.ERROR);
 								continue;
@@ -1255,6 +1299,16 @@ public class LimsChannelSelector_Main implements PlugIn {
 	 * @return true if channel was successfully removed from the OME metadata
 	 */
 	private boolean removeChannelFromOMEXML (String path, int channelToBeRemoved) {
+		return removeChannelFromOMEXML(path, channelToBeRemoved, "");
+	}
+	
+	/**
+	 * Removes annoations for a channel in the OME XML metadata of a .ome.tiff file located at @param path.
+	 * @param channel: channel to be removed (1-based, so channel > 0, channel <= nr of channels.
+	 * @param addToDescription: allows to give a String that shall be added to the end of the description xml node in the OME XML metadata
+	 * @return true if channel was successfully removed from the OME metadata
+	 */
+	private boolean removeChannelFromOMEXML (String path, int channelToBeRemoved, String addToDescription) {
 		String comment = "";
 		String tmpMsg;
 		/**
@@ -1465,10 +1519,10 @@ public class LimsChannelSelector_Main implements PlugIn {
 				progress.notifyMessage("" + tmpMsg, ProgressDialog.NOTIFICATION);
 			}
 			Node descriptionNode = getFirstNodeWithName(omeXMLDoc.getElementsByTagName("Image").item(0).getChildNodes(), "Description");
-			String description = descriptionNode.getTextContent();
-			description += " Channel " + channelToBeRemoved + " / " + NrOfChannels + " was removed from this image using the ImageJ plugin '" + PLUGINNAME + "' "
+			String description = descriptionNode.getTextContent() + "\n";
+			description += "Channel " + channelToBeRemoved + " / " + NrOfChannels + " was removed from this image using the ImageJ plugin '" + PLUGINNAME + "' "
 					+ "(Version " + PLUGINVERSION + ", more information at " + PLUGINURL + ").";
-			description += " After removing the channel, all other channel IDs, numbers, and names were shifted/corrected to create a " + (NrOfChannels-1) + "-channel image, in detail:";
+			description += "\n" + "After removing the channel, all other channel IDs, numbers, and names were shifted/corrected to create a " + (NrOfChannels-1) + "-channel image, in detail:";
 			for(int c = 0; c < NrOfChannels; c++) {
 				if((c+1) == channelToBeRemoved) {
 					description += " Channel " + (c+1) + " was removed;";
@@ -1478,8 +1532,8 @@ public class LimsChannelSelector_Main implements PlugIn {
 			}
 			description = description.substring(0,description.length()-1);
 			description += ". ";
-			description += "See original metadata annotations for the original image dimensions and information.";
-			
+			description += "\n" + "See original metadata annotations for the original image dimensions and information.";
+			description += "\n" + addToDescription;
 			descriptionNode.setTextContent(description);		
 			
 			tmpMsg = "Adjusted SizeC to " + descriptionNode.getTextContent() + "in OME XML of " + path + "!";
